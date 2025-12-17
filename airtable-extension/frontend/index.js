@@ -19,7 +19,69 @@ import React, { useState } from 'react';
 // Asana template URL - update this to your template
 const ASANA_TEMPLATE_URL = 'https://app.asana.com/0/projects/new/project-template/1204221248144075';
 
-// Generate Asana create task URL with prefilled name (undocumented feature)
+// GlobalConfig keys for Asana PAT storage
+const ASANA_PAT_KEY = 'asanaPat';
+
+// Parse Asana project GID from board URL
+// Supports: /0/PROJECT_GID/... and /1/WORKSPACE/project/PROJECT_GID/...
+function parseAsanaProjectGid(url) {
+    if (!url) return null;
+    // Format 1: https://app.asana.com/0/PROJECT_GID/...
+    const format1 = url.match(/app\.asana\.com\/0\/(\d+)/);
+    if (format1) return format1[1];
+    // Format 2: https://app.asana.com/1/WORKSPACE/project/PROJECT_GID/...
+    const format2 = url.match(/app\.asana\.com\/1\/\d+\/project\/(\d+)/);
+    if (format2) return format2[1];
+    return null;
+}
+
+// Validate Asana PAT by calling /users/me
+async function validateAsanaPat(pat) {
+    const response = await fetch('https://app.asana.com/api/1.0/users/me', {
+        headers: {
+            'Authorization': `Bearer ${pat}`,
+            'Content-Type': 'application/json',
+        },
+    });
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.errors?.[0]?.message || 'Invalid or expired PAT');
+    }
+    const data = await response.json();
+    return data.data; // { gid, email, name, workspaces }
+}
+
+// Create Asana task via API
+async function createAsanaTask(pat, projectGid, milestone) {
+    const response = await fetch('https://app.asana.com/api/1.0/tasks', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${pat}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            data: {
+                name: milestone.name,
+                notes: milestone.description || '',
+                due_on: milestone.dueDate || null, // Format: "YYYY-MM-DD"
+                projects: [projectGid],
+            },
+        }),
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.errors?.[0]?.message || 'Failed to create task');
+    }
+
+    const data = await response.json();
+    const taskGid = data.data.gid;
+    const taskUrl = `https://app.asana.com/0/${projectGid}/${taskGid}`;
+
+    return { taskGid, taskUrl };
+}
+
+// Generate Asana create task URL with prefilled name (fallback for when no PAT)
 function getAsanaCreateTaskUrl(taskName, projectName) {
     const encodedName = encodeURIComponent(taskName);
     const encodedNotes = encodeURIComponent(`Milestone for: ${projectName}`);
@@ -28,6 +90,7 @@ function getAsanaCreateTaskUrl(taskName, projectName) {
 
 function ScopeOfWorkGenerator() {
     const base = useBase();
+    const globalConfig = useGlobalConfig();
     const [selectedRecordId, setSelectedRecordId] = useState(null);
     const [isGenerating, setIsGenerating] = useState(false);
     const [isSavingUrl, setIsSavingUrl] = useState(false);
@@ -35,8 +98,26 @@ function ScopeOfWorkGenerator() {
     const [error, setError] = useState(null);
     const [asanaBoardUrl, setAsanaBoardUrl] = useState('');
 
+    // Settings state
+    const [showSettings, setShowSettings] = useState(false);
+    const [patInput, setPatInput] = useState('');
+    const [isTestingPat, setIsTestingPat] = useState(false);
+    const [patStatus, setPatStatus] = useState(null);
+
+    // Milestone creation state
+    const [milestoneStatuses, setMilestoneStatuses] = useState({});
+    // { milestoneId: { status: 'pending'|'creating'|'success'|'error', error: '...' } }
+
+    // Get stored PAT from globalConfig
+    const storedPat = globalConfig.get(ASANA_PAT_KEY);
+    const hasAsanaConfig = !!storedPat;
+
     // Get the Projects table
     const projectsTable = base.getTableByNameIfExists('Projects');
+
+    // Get the Milestones table
+    const milestonesTable = base.getTableByNameIfExists('Milestones');
+    const asanaUrlField = milestonesTable?.getFieldByNameIfExists('Asana URL');
 
     // Get all project records
     const records = useRecords(projectsTable, {
@@ -51,7 +132,13 @@ function ScopeOfWorkGenerator() {
             'Milestone Rollup (from Milestones)',
             'Scope of Work - Generated',
             'Asana Board',
+            'Milestones', // Linked records
         ],
+    });
+
+    // Get all milestone records (to access full details)
+    const allMilestones = useRecords(milestonesTable, {
+        fields: ['Milestone', 'Description', 'Due Date', 'Status', 'Project', 'Asana URL'],
     });
 
     if (!projectsTable) {
@@ -309,6 +396,74 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
         }
     }
 
+    // Test and save Asana PAT
+    async function handleTestAndSavePat() {
+        if (!patInput.trim()) {
+            setPatStatus({ type: 'error', message: 'Please enter a PAT' });
+            return;
+        }
+
+        setIsTestingPat(true);
+        setPatStatus(null);
+
+        try {
+            const userData = await validateAsanaPat(patInput.trim());
+            await globalConfig.setAsync(ASANA_PAT_KEY, patInput.trim());
+            setPatStatus({ type: 'success', message: `Connected as ${userData.name} (${userData.email})` });
+            setPatInput(''); // Clear input after save
+        } catch (err) {
+            setPatStatus({ type: 'error', message: err.message });
+        } finally {
+            setIsTestingPat(false);
+        }
+    }
+
+    // Clear stored PAT
+    async function handleClearPat() {
+        await globalConfig.setAsync(ASANA_PAT_KEY, undefined);
+        setPatStatus({ type: 'success', message: 'PAT removed' });
+    }
+
+    // Create Asana task for a milestone
+    async function handleCreateMilestoneTask(milestone, projectGid) {
+        const milestoneId = milestone.id;
+
+        setMilestoneStatuses((prev) => ({
+            ...prev,
+            [milestoneId]: { status: 'creating' },
+        }));
+
+        try {
+            const milestoneData = {
+                name: milestone.getCellValueAsString('Milestone'),
+                description: milestone.getCellValueAsString('Description') || '',
+                dueDate: milestone.getCellValue('Due Date') || null,
+            };
+
+            const { taskUrl } = await createAsanaTask(storedPat, projectGid, milestoneData);
+
+            // Write task URL back to milestone record if field exists
+            if (asanaUrlField && milestonesTable) {
+                await milestonesTable.updateRecordAsync(milestone.id, {
+                    'Asana URL': taskUrl,
+                });
+            }
+
+            setMilestoneStatuses((prev) => ({
+                ...prev,
+                [milestoneId]: { status: 'success', taskUrl },
+            }));
+
+            setStatus(`✓ Created Asana task for "${milestoneData.name}"`);
+        } catch (err) {
+            setMilestoneStatuses((prev) => ({
+                ...prev,
+                [milestoneId]: { status: 'error', error: err.message },
+            }));
+            setError(`Failed to create task: ${err.message}`);
+        }
+    }
+
     // Build record options for select
     const recordOptions = records
         ? records.map((record) => ({
@@ -320,7 +475,16 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
     // Get the currently selected record and its Asana Board value
     const selectedRecord = selectedRecordId ? records?.find((r) => r.id === selectedRecordId) : null;
     const existingAsanaBoard = selectedRecord?.getCellValueAsString('Asana Board') || '';
+    const asanaProjectGid = parseAsanaProjectGid(existingAsanaBoard);
     const selectedProjectName = selectedRecord?.getCellValueAsString('Project') || '';
+
+    // Get linked milestone records for the selected project (with full details)
+    const linkedMilestoneIds = selectedRecord?.getCellValue('Milestones')?.map((link) => link.id) || [];
+    const projectMilestones = allMilestones
+        ? allMilestones.filter((m) => linkedMilestoneIds.includes(m.id))
+        : [];
+
+    // Legacy: names from rollup (fallback)
     const selectedMilestones = selectedRecord
         ? (selectedRecord.getCellValueAsString('Milestone Rollup (from Milestones)') || '')
               .split(/[\n\r,]+/)
@@ -338,6 +502,111 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                 Select a project to link its Asana board and generate Scope of Work documentation.
             </Text>
 
+            {/* Settings Section */}
+            <Box marginBottom={3}>
+                <Button
+                    onClick={() => setShowSettings(!showSettings)}
+                    icon={showSettings ? 'chevronUp' : 'cog'}
+                    variant="secondary"
+                    size="small"
+                >
+                    {showSettings ? 'Hide Settings' : 'Asana Settings'}
+                    {hasAsanaConfig && !showSettings && ' ✓'}
+                </Button>
+
+                {showSettings && (
+                    <Box
+                        marginTop={2}
+                        padding={3}
+                        backgroundColor={colors.GRAY_LIGHT_2}
+                        borderRadius={3}
+                    >
+                        <Heading size="xsmall" marginBottom={2}>
+                            Asana API Configuration
+                        </Heading>
+
+                        {hasAsanaConfig ? (
+                            <Box>
+                                <Text marginBottom={2} textColor="green">
+                                    ✓ Asana PAT configured
+                                </Text>
+                                <Button
+                                    onClick={handleClearPat}
+                                    icon="x"
+                                    variant="danger"
+                                    size="small"
+                                >
+                                    Remove PAT
+                                </Button>
+                            </Box>
+                        ) : (
+                            <Box>
+                                <Text size="small" marginBottom={2}>
+                                    Enter your Asana Personal Access Token to enable direct task creation.
+                                </Text>
+                                <Text size="small" textColor="light" marginBottom={2}>
+                                    Get a PAT from{' '}
+                                    <a
+                                        href="https://app.asana.com/0/developer-console"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        Asana Developer Console
+                                    </a>
+                                </Text>
+                                <Box display="flex" alignItems="center" marginBottom={2}>
+                                    <Input
+                                        type="password"
+                                        value={patInput}
+                                        onChange={(e) => setPatInput(e.target.value)}
+                                        placeholder="Enter PAT..."
+                                        width="100%"
+                                    />
+                                    <Button
+                                        onClick={handleTestAndSavePat}
+                                        disabled={!patInput || isTestingPat}
+                                        variant="primary"
+                                        marginLeft={2}
+                                        size="small"
+                                    >
+                                        {isTestingPat ? 'Testing...' : 'Save'}
+                                    </Button>
+                                </Box>
+                                <Text size="small" textColor="orange">
+                                    ⚠️ Note: PAT is stored in base config and visible to all collaborators.
+                                </Text>
+                            </Box>
+                        )}
+
+                        {patStatus && (
+                            <Box
+                                marginTop={2}
+                                padding={2}
+                                backgroundColor={patStatus.type === 'error' ? colors.RED_LIGHT_2 : colors.GREEN_LIGHT_2}
+                                borderRadius={2}
+                            >
+                                <Text textColor={patStatus.type === 'error' ? 'red' : 'green'}>
+                                    {patStatus.message}
+                                </Text>
+                            </Box>
+                        )}
+
+                        {!asanaUrlField && milestonesTable && (
+                            <Box
+                                marginTop={2}
+                                padding={2}
+                                backgroundColor={colors.YELLOW_LIGHT_2}
+                                borderRadius={2}
+                            >
+                                <Text size="small">
+                                    ⚠️ Add an "Asana URL" field (type: URL) to the Milestones table to save task links.
+                                </Text>
+                            </Box>
+                        )}
+                    </Box>
+                )}
+            </Box>
+
             <FormField label="Select Project" marginBottom={3}>
                 <Select
                     options={recordOptions}
@@ -347,6 +616,7 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                         setStatus(null);
                         setError(null);
                         setAsanaBoardUrl('');
+                        setMilestoneStatuses({});
                     }}
                     placeholder="Choose a project..."
                     width="100%"
@@ -462,44 +732,96 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                     )}
 
                     {/* Milestones section - show when there are milestones */}
-                    {selectedMilestones.length > 0 && (
+                    {projectMilestones.length > 0 && (
                         <Box marginBottom={2}>
                             <Text marginBottom={2}>
-                                <strong>Milestones:</strong> Create tasks for these milestones:
+                                <strong>Milestones:</strong> Create Asana tasks for these milestones:
                             </Text>
                             <Box
                                 padding={2}
                                 backgroundColor={colors.WHITE}
                                 borderRadius={2}
                             >
-                                {selectedMilestones.map((milestone, index) => (
-                                    <Box
-                                        key={index}
-                                        display="flex"
-                                        alignItems="center"
-                                        justifyContent="space-between"
-                                        paddingY={1}
-                                        borderBottom={index < selectedMilestones.length - 1 ? 'default' : 'none'}
-                                    >
-                                        <Text>{milestone}</Text>
-                                        <Button
-                                            onClick={() => window.open(getAsanaCreateTaskUrl(milestone, selectedProjectName), '_blank')}
-                                            icon="plus"
-                                            size="small"
-                                            variant="secondary"
+                                {projectMilestones.map((milestone, index) => {
+                                    const milestoneName = milestone.getCellValueAsString('Milestone');
+                                    const milestoneAsanaUrl = milestone.getCellValueAsString('Asana URL');
+                                    const milestoneStatus = milestoneStatuses[milestone.id];
+                                    const dueDate = milestone.getCellValue('Due Date');
+
+                                    // Determine effective URL (from record or from creation status)
+                                    const effectiveUrl = milestoneAsanaUrl || milestoneStatus?.taskUrl;
+
+                                    return (
+                                        <Box
+                                            key={milestone.id}
+                                            display="flex"
+                                            alignItems="center"
+                                            justifyContent="space-between"
+                                            paddingY={1}
+                                            borderBottom={index < projectMilestones.length - 1 ? 'default' : 'none'}
                                         >
-                                            Create Task
-                                        </Button>
-                                    </Box>
-                                ))}
+                                            <Box>
+                                                <Text>{milestoneName}</Text>
+                                                {dueDate && (
+                                                    <Text size="small" textColor="light">
+                                                        Due: {formatDate(dueDate)}
+                                                    </Text>
+                                                )}
+                                            </Box>
+                                            <Box display="flex" alignItems="center">
+                                                {milestoneStatus?.status === 'error' && (
+                                                    <Text size="small" textColor="red" marginRight={2}>
+                                                        {milestoneStatus.error}
+                                                    </Text>
+                                                )}
+                                                {effectiveUrl ? (
+                                                    <Button
+                                                        onClick={() => window.open(effectiveUrl, '_blank')}
+                                                        icon="share1"
+                                                        size="small"
+                                                        variant="secondary"
+                                                    >
+                                                        View in Asana
+                                                    </Button>
+                                                ) : hasAsanaConfig && asanaProjectGid ? (
+                                                    <Button
+                                                        onClick={() => handleCreateMilestoneTask(milestone, asanaProjectGid)}
+                                                        disabled={milestoneStatus?.status === 'creating'}
+                                                        icon={milestoneStatus?.status === 'creating' ? undefined : 'plus'}
+                                                        size="small"
+                                                        variant="primary"
+                                                    >
+                                                        {milestoneStatus?.status === 'creating' ? 'Creating...' : 'Create in Asana'}
+                                                    </Button>
+                                                ) : (
+                                                    <Button
+                                                        onClick={() => window.open(getAsanaCreateTaskUrl(milestoneName, selectedProjectName), '_blank')}
+                                                        icon="plus"
+                                                        size="small"
+                                                        variant="secondary"
+                                                    >
+                                                        Create Task
+                                                    </Button>
+                                                )}
+                                            </Box>
+                                        </Box>
+                                    );
+                                })}
                             </Box>
-                            <Text size="small" textColor="light" marginTop={1}>
-                                Tasks open in "My Tasks" — assign them to your project after creation.
-                            </Text>
+                            {!hasAsanaConfig && (
+                                <Text size="small" textColor="light" marginTop={1}>
+                                    Configure Asana PAT in Settings for direct task creation.
+                                </Text>
+                            )}
+                            {hasAsanaConfig && !asanaProjectGid && existingAsanaBoard && (
+                                <Text size="small" textColor="orange" marginTop={1}>
+                                    Could not parse project ID from Asana Board URL.
+                                </Text>
+                            )}
                         </Box>
                     )}
 
-                    {selectedMilestones.length === 0 && (
+                    {projectMilestones.length === 0 && (
                         <Box padding={2} backgroundColor={colors.YELLOW_LIGHT_2} borderRadius={2}>
                             <Text size="small">
                                 No milestones linked yet. Add milestones to this project in Airtable.
@@ -514,10 +836,11 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                     How it works:
                 </Heading>
                 <Text size="small" textColor="light">
-                    1. Select a project from the dropdown{'\n'}
-                    2. Link the Asana board (create from template or paste existing URL){'\n'}
-                    3. Optionally generate Scope of Work document{'\n'}
-                    4. Add milestones from Airtable to your Asana board
+                    1. Configure Asana PAT in Settings (optional, enables direct task creation){'\n'}
+                    2. Select a project from the dropdown{'\n'}
+                    3. Link the Asana board (create from template or paste existing URL){'\n'}
+                    4. Create Asana tasks for milestones (auto-saves task URL to Airtable){'\n'}
+                    5. Optionally generate Scope of Work document
                 </Text>
             </Box>
         </Box>
