@@ -21,12 +21,12 @@
  *    endDate              | Text | End Date field
  *    status               | Text | Status field
  *    rolesSummary         | Text | Roles Summary (rollup from linked Assignments)
- *    milestoneSummary     | Text | Milestone Summary (rollup from linked Milestones)
+ *    milestoneSummary     | Text | Milestone Rollup (rollup from linked Milestones)
  *
  * 5. Copy this entire script into the script editor
  * 6. Add "Update record" action after script:
  *    - Record ID: use recordId from script output
- *    - SOW: use sow from script output
+ *    - Scope of Work - Generated: use scopeOfWork from script output
  */
 
 // Get input variables from automation configuration
@@ -35,8 +35,8 @@ const inputConfig = input.config();
 // Asana template URL (update this to your template)
 const ASANA_TEMPLATE_URL = 'https://app.asana.com/0/projects/new/project-template/1204221248144075';
 
-// Extract all project fields
-const recordId = inputConfig.recordId;
+// Extract all project fields with defaults
+const recordId = inputConfig.recordId || '';
 const projectTitle = inputConfig.projectTitle || 'Untitled Project';
 const projectAcronym = inputConfig.projectAcronym || '';
 const projectDescription = inputConfig.projectDescription || '_No description provided_';
@@ -45,6 +45,16 @@ const endDate = inputConfig.endDate || 'TBD';
 const status = inputConfig.status || 'In Ideation';
 const rolesSummary = inputConfig.rolesSummary || ''; // From rollup of linked Assignments
 const milestoneSummary = inputConfig.milestoneSummary || ''; // From rollup of linked Milestones
+
+// Debug: log what we received
+console.log('Input values received:');
+console.log('- recordId:', recordId ? 'set' : 'MISSING');
+console.log('- projectTitle:', projectTitle);
+console.log('- projectAcronym:', projectAcronym || '(none)');
+console.log('- projectDescription:', projectDescription ? 'set' : 'MISSING');
+console.log('- status:', status);
+console.log('- rolesSummary:', rolesSummary || '(empty)');
+console.log('- milestoneSummary:', milestoneSummary || '(empty)');
 
 // Format today's date
 const today = new Date();
@@ -226,11 +236,17 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
 `;
 
 console.log(`Generated scoping document for: ${displayTitle}`);
+console.log(`Document length: ${scopingDocument ? scopingDocument.length : 0} characters`);
+
+// Validate outputs before setting
+if (!scopingDocument || typeof scopingDocument !== 'string') {
+    throw new Error('Failed to generate scoping document - result is undefined or not a string');
+}
 
 // Output values for subsequent automation actions
-// Note: Map 'sow' output to the "SOW" field in Projects table
-output.set('sow', scopingDocument);
-output.set('recordId', recordId);
+// Note: Map 'scopeOfWork' output to the "Scope of Work - Generated" field in Projects table
+output.set('scopeOfWork', scopingDocument);
+output.set('recordId', recordId || '');
 output.set('success', true);
 
 console.log('Scoping document generation completed successfully!');

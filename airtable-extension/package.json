@@ -1,0 +1,16 @@
+{
+    "name": "scope-of-work-generator",
+    "version": "1.0.0",
+    "description": "Generate Scope of Work documents for projects",
+    "scripts": {
+        "start": "block run",
+        "build": "block build"
+    },
+    "dependencies": {
+        "@airtable/blocks": "^0.0.54",
+        "regenerator-runtime": "^0.14.1"
+    },
+    "devDependencies": {
+        "@airtable/blocks-cli": "^2.0.0"
+    }
+}
