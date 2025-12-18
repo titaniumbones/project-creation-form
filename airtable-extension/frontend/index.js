@@ -185,10 +185,11 @@ function ScopeOfWorkGenerator() {
     const [milestoneStatuses, setMilestoneStatuses] = useState({});
     // { milestoneId: { status: 'pending'|'creating'|'success'|'error', error: '...' } }
 
-    // Asana workspace and users cache (for coordinator lookup)
+    // Asana workspace and users cache (for role lookups)
     const [workspaceGid, setWorkspaceGid] = useState(null);
     const [asanaUsers, setAsanaUsers] = useState([]);
     const [coordinatorMatch, setCoordinatorMatch] = useState(null);
+    const [ownerMatch, setOwnerMatch] = useState(null);
 
     // Get stored PAT from globalConfig
     const storedPat = globalConfig.get(ASANA_PAT_KEY);
@@ -215,6 +216,7 @@ function ScopeOfWorkGenerator() {
             'Scope of Work - Generated',
             'Asana Board',
             'Milestones', // Linked records
+            'Project Owners', // Linked to Data Team Members
         ],
     });
 
@@ -237,6 +239,10 @@ function ScopeOfWorkGenerator() {
 
     // Memoize record IDs to create stable dependency references
     // (useRecords returns new array refs on every render)
+    const projectIds = useMemo(
+        () => records?.map((r) => r.id).join(',') || '',
+        [records]
+    );
     const assignmentIds = useMemo(
         () => allAssignments?.map((a) => a.id).join(',') || '',
         [allAssignments]
@@ -326,6 +332,46 @@ function ScopeOfWorkGenerator() {
                 : { name: coordinatorName, asanaUser: null, score: 0, matchType: 'no_match' }
         );
     }, [selectedRecordId, assignmentIds, teamMemberIds, asanaUsers.length]);
+
+    // Find Project Owner for selected project (from Project Owners field in Projects table)
+    // NOTE: Using stable ID strings in deps instead of array refs to prevent infinite re-renders
+    useEffect(() => {
+        if (!selectedRecordId || !records || !allDataTeamMembers || asanaUsers.length === 0) {
+            setOwnerMatch(null);
+            return;
+        }
+
+        // Find the selected project record
+        const selectedProject = records.find((r) => r.id === selectedRecordId);
+        if (!selectedProject) {
+            setOwnerMatch(null);
+            return;
+        }
+
+        // Get Project Owners from the linked field
+        const projectOwners = selectedProject.getCellValue('Project Owners') || [];
+        if (projectOwners.length === 0) {
+            setOwnerMatch(null);
+            return;
+        }
+
+        // Get the first owner's name from Data Team Members table
+        const ownerRecord = allDataTeamMembers.find((m) => m.id === projectOwners[0].id);
+        const ownerName = ownerRecord?.getCellValueAsString('Full Name');
+
+        if (!ownerName) {
+            setOwnerMatch(null);
+            return;
+        }
+
+        // Find matching Asana user
+        const match = findBestUserMatch(ownerName, asanaUsers);
+        setOwnerMatch(
+            match
+                ? { name: ownerName, asanaUser: match.user, score: match.score, matchType: match.matchType }
+                : { name: ownerName, asanaUser: null, score: 0, matchType: 'no_match' }
+        );
+    }, [selectedRecordId, projectIds, teamMemberIds, asanaUsers.length]);
 
     if (!projectsTable) {
         return (
@@ -616,6 +662,7 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
         setWorkspaceGid(null);
         setAsanaUsers([]);
         setCoordinatorMatch(null);
+        setOwnerMatch(null);
         setPatStatus({ type: 'success', message: 'PAT removed' });
     }
 
@@ -826,6 +873,7 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                         setAsanaBoardUrl('');
                         setMilestoneStatuses({});
                         setCoordinatorMatch(null);
+                        setOwnerMatch(null);
                     }}
                     placeholder="Choose a project..."
                     width="100%"
@@ -940,30 +988,51 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                         </Box>
                     )}
 
-                    {/* Coordinator assignment status */}
-                    {hasAsanaConfig && coordinatorMatch && (
+                    {/* Role assignment status - show coordinator and/or owner */}
+                    {hasAsanaConfig && (coordinatorMatch || ownerMatch) && (
                         <Box
                             marginBottom={2}
                             padding={2}
-                            backgroundColor={coordinatorMatch.asanaUser ? colors.GREEN_LIGHT_2 : colors.YELLOW_LIGHT_2}
+                            backgroundColor={
+                                (coordinatorMatch?.asanaUser || ownerMatch?.asanaUser)
+                                    ? colors.GREEN_LIGHT_2
+                                    : colors.YELLOW_LIGHT_2
+                            }
                             borderRadius={2}
                         >
-                            <Text size="small">
-                                <strong>Project Coordinator:</strong> {coordinatorMatch.name}
-                                {coordinatorMatch.asanaUser ? (
-                                    <span style={{ color: colors.GREEN }}>
-                                        {' '}→ {coordinatorMatch.asanaUser.name} in Asana
-                                        {coordinatorMatch.matchType !== 'exact' && ` (${coordinatorMatch.matchType} match)`}
-                                    </span>
-                                ) : (
-                                    <span style={{ color: colors.ORANGE }}>
-                                        {' '}(no matching Asana user found)
-                                    </span>
-                                )}
-                            </Text>
-                            {coordinatorMatch.asanaUser && (
-                                <Text size="small" textColor="light">
-                                    Tasks will be auto-assigned to this user
+                            {coordinatorMatch && (
+                                <Text size="small" marginBottom={ownerMatch ? 1 : 0}>
+                                    <strong>Project Coordinator:</strong> {coordinatorMatch.name}
+                                    {coordinatorMatch.asanaUser ? (
+                                        <span style={{ color: colors.GREEN }}>
+                                            {' '}→ {coordinatorMatch.asanaUser.name} in Asana
+                                            {coordinatorMatch.matchType !== 'exact' && ` (${coordinatorMatch.matchType} match)`}
+                                        </span>
+                                    ) : (
+                                        <span style={{ color: colors.ORANGE }}>
+                                            {' '}(no matching Asana user found)
+                                        </span>
+                                    )}
+                                </Text>
+                            )}
+                            {ownerMatch && (
+                                <Text size="small">
+                                    <strong>Project Owner:</strong> {ownerMatch.name}
+                                    {ownerMatch.asanaUser ? (
+                                        <span style={{ color: colors.GREEN }}>
+                                            {' '}→ {ownerMatch.asanaUser.name} in Asana
+                                            {ownerMatch.matchType !== 'exact' && ` (${ownerMatch.matchType} match)`}
+                                        </span>
+                                    ) : (
+                                        <span style={{ color: colors.ORANGE }}>
+                                            {' '}(no matching Asana user found)
+                                        </span>
+                                    )}
+                                </Text>
+                            )}
+                            {coordinatorMatch?.asanaUser && (
+                                <Text size="small" textColor="light" marginTop={1}>
+                                    Tasks will be auto-assigned to Project Coordinator
                                 </Text>
                             )}
                         </Box>
