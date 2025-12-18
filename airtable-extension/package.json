@@ -4,7 +4,7 @@
     "description": "Generate Scope of Work documents for projects",
     "scripts": {
         "start": "block run",
-        "build": "block build"
+        "release": "block release"
     },
     "dependencies": {
         "@airtable/blocks": "^0.0.54",
