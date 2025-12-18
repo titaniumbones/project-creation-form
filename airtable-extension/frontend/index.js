@@ -16,11 +16,13 @@ import {
 } from '@airtable/blocks/ui';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 
-// Asana template URL - update this to your template
+// Asana template URL and GID - update this to your template
 const ASANA_TEMPLATE_URL = 'https://app.asana.com/0/projects/new/project-template/1204221248144075';
+const ASANA_TEMPLATE_GID = '1204221248144075';
 
-// GlobalConfig keys for Asana PAT storage
+// GlobalConfig keys for Asana settings storage
 const ASANA_PAT_KEY = 'asanaPat';
+const ASANA_TEAM_GID_KEY = 'asanaTeamGid';
 
 // Parse Asana project GID from board URL
 // Supports: /0/PROJECT_GID/... and /1/WORKSPACE/project/PROJECT_GID/...
@@ -165,6 +167,160 @@ function getAsanaCreateTaskUrl(taskName, projectName) {
     return `https://app.asana.com/0/-/create_task?name=${encodedName}&notes=${encodedNotes}`;
 }
 
+// Fetch project template details to get required dates and roles
+async function getProjectTemplate(pat, templateGid) {
+    const response = await fetch(
+        `https://app.asana.com/api/1.0/project_templates/${templateGid}?opt_fields=name,requested_dates,requested_roles`,
+        {
+            headers: {
+                'Authorization': `Bearer ${pat}`,
+                'Content-Type': 'application/json',
+            },
+        }
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.errors?.[0]?.message || 'Failed to fetch project template');
+    }
+
+    const data = await response.json();
+    return data.data;
+}
+
+// Format a date to YYYY-MM-DD for Asana API
+function formatDateForAsana(dateValue) {
+    if (!dateValue) return null;
+    // If it's already a string in YYYY-MM-DD format, use it
+    if (typeof dateValue === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+        return dateValue;
+    }
+    // Otherwise parse and format
+    const date = new Date(dateValue);
+    if (isNaN(date.getTime())) return null;
+    return date.toISOString().split('T')[0];
+}
+
+// Create Asana project from template
+// roleAssignments: array of { roleName: string, userGid: string } to map template roles to users
+async function createProjectFromTemplate(pat, templateGid, name, teamGid, startDate = null, roleAssignments = []) {
+    // First, get the template to see what dates and roles are required
+    const template = await getProjectTemplate(pat, templateGid);
+
+    // Build requested_dates array with today's date (or provided start date) for each required date
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+    const formattedStartDate = formatDateForAsana(startDate);
+    const dateValue = formattedStartDate || today;
+
+    const requestedDates = (template.requested_dates || []).map((dateField) => ({
+        gid: dateField.gid,
+        value: dateValue,
+    }));
+
+    // Build requested_roles array by matching template roles to our role assignments
+    // Template roles have: { gid, name }
+    // We match by name (case-insensitive, partial match)
+    const requestedRoles = [];
+    for (const templateRole of (template.requested_roles || [])) {
+        const templateRoleName = templateRole.name?.toLowerCase() || '';
+
+        // Find matching role assignment
+        const match = roleAssignments.find((ra) => {
+            const assignmentName = ra.roleName?.toLowerCase() || '';
+            // Match if template role contains our role name or vice versa
+            return templateRoleName.includes(assignmentName) ||
+                   assignmentName.includes(templateRoleName) ||
+                   // Also try common variations
+                   (assignmentName.includes('coordinator') && templateRoleName.includes('coordinator')) ||
+                   (assignmentName.includes('owner') && templateRoleName.includes('owner')) ||
+                   (assignmentName.includes('owner') && templateRoleName.includes('lead')) ||
+                   (assignmentName.includes('lead') && templateRoleName.includes('lead'));
+        });
+
+        if (match) {
+            requestedRoles.push({
+                gid: templateRole.gid,
+                value: match.userGid,
+            });
+        }
+    }
+
+    const requestBody = {
+        data: {
+            name: name,
+            team: teamGid,
+            public: false,
+        },
+    };
+
+    // Only add requested_dates if there are any
+    if (requestedDates.length > 0) {
+        requestBody.data.requested_dates = requestedDates;
+    }
+
+    // Only add requested_roles if there are any matches
+    if (requestedRoles.length > 0) {
+        requestBody.data.requested_roles = requestedRoles;
+    }
+
+    console.log('[Asana API] Template roles:', template.requested_roles);
+    console.log('[Asana API] Role assignments:', roleAssignments);
+    console.log('[Asana API] Matched requested_roles:', requestedRoles);
+
+    const response = await fetch(
+        `https://app.asana.com/api/1.0/project_templates/${templateGid}/instantiateProject`,
+        {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${pat}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody),
+        }
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.errors?.[0]?.message || 'Failed to create project from template');
+    }
+
+    const data = await response.json();
+    // The response contains a job with new_project info
+    const projectGid = data.data?.new_project?.gid;
+    if (!projectGid) {
+        throw new Error('Project creation did not return a project GID');
+    }
+    return projectGid;
+}
+
+// Add members to an Asana project
+async function addProjectMembers(pat, projectGid, memberGids) {
+    if (!memberGids || memberGids.length === 0) return true;
+
+    const response = await fetch(
+        `https://app.asana.com/api/1.0/projects/${projectGid}/addMembers`,
+        {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${pat}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                data: {
+                    members: memberGids,
+                },
+            }),
+        }
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.errors?.[0]?.message || 'Failed to add members to project');
+    }
+
+    return true;
+}
+
 function ScopeOfWorkGenerator() {
     const base = useBase();
     const globalConfig = useGlobalConfig();
@@ -191,9 +347,15 @@ function ScopeOfWorkGenerator() {
     const [coordinatorMatch, setCoordinatorMatch] = useState(null);
     const [ownerMatch, setOwnerMatch] = useState(null);
 
-    // Get stored PAT from globalConfig
+    // Project creation state
+    const [creatingProject, setCreatingProject] = useState(false);
+    const [teamGidInput, setTeamGidInput] = useState('');
+
+    // Get stored settings from globalConfig
     const storedPat = globalConfig.get(ASANA_PAT_KEY);
+    const storedTeamGid = globalConfig.get(ASANA_TEAM_GID_KEY);
     const hasAsanaConfig = !!storedPat;
+    const hasFullAsanaConfig = !!storedPat && !!storedTeamGid;
 
     // Get the Projects table
     const projectsTable = base.getTableByNameIfExists('Projects');
@@ -666,6 +828,146 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
         setPatStatus({ type: 'success', message: 'PAT removed' });
     }
 
+    // Track member addition status
+    const [memberAddStatus, setMemberAddStatus] = useState(null);
+    // { attempted: boolean, succeeded: string[], failed: string[], projectGid: string }
+
+    // Create Asana project from template with team members
+    async function handleCreateAsanaProject() {
+        if (!storedPat || !storedTeamGid) {
+            setError('Asana PAT and Team GID must be configured in Settings');
+            return;
+        }
+
+        setCreatingProject(true);
+        setError(null);
+        setStatus(null);
+        setMemberAddStatus(null);
+
+        try {
+            // Get project start date if available
+            const projectStartDate = selectedRecord?.getCellValue('Start Date') || null;
+
+            // Build role assignments for template roles
+            const roleAssignments = [];
+            if (coordinatorMatch?.asanaUser?.gid) {
+                roleAssignments.push({
+                    roleName: 'coordinator',
+                    userGid: coordinatorMatch.asanaUser.gid,
+                });
+            }
+            if (ownerMatch?.asanaUser?.gid) {
+                roleAssignments.push({
+                    roleName: 'owner',
+                    userGid: ownerMatch.asanaUser.gid,
+                });
+                // Also try "lead" mapping for owner
+                roleAssignments.push({
+                    roleName: 'lead',
+                    userGid: ownerMatch.asanaUser.gid,
+                });
+            }
+
+            // 1. Create project from template with role assignments
+            const projectGid = await createProjectFromTemplate(
+                storedPat,
+                ASANA_TEMPLATE_GID,
+                selectedProjectName,
+                storedTeamGid,
+                projectStartDate,
+                roleAssignments
+            );
+
+            // 2. Save project URL to Airtable first (so we don't lose it if member add fails)
+            const projectUrl = `https://app.asana.com/0/${projectGid}/list`;
+            await projectsTable.updateRecordAsync(selectedRecordId, {
+                'Asana Board': projectUrl,
+            });
+
+            // 3. Collect members to add (coordinator + owner)
+            const membersToAdd = [
+                coordinatorMatch?.asanaUser ? { name: coordinatorMatch.asanaUser.name, gid: coordinatorMatch.asanaUser.gid, role: 'Coordinator' } : null,
+                ownerMatch?.asanaUser ? { name: ownerMatch.asanaUser.name, gid: ownerMatch.asanaUser.gid, role: 'Owner' } : null,
+            ].filter(Boolean);
+
+            // Remove duplicates by GID
+            const uniqueMembers = membersToAdd.filter((m, i, arr) =>
+                arr.findIndex(x => x.gid === m.gid) === i
+            );
+
+            // 4. Try to add members (gracefully handle failure)
+            const succeeded = [];
+            const failed = [];
+
+            if (uniqueMembers.length > 0) {
+                try {
+                    await addProjectMembers(storedPat, projectGid, uniqueMembers.map(m => m.gid));
+                    succeeded.push(...uniqueMembers);
+                } catch (memberErr) {
+                    console.error('[Asana API] Failed to add members:', memberErr);
+                    failed.push(...uniqueMembers.map(m => ({ ...m, error: memberErr.message })));
+                }
+            }
+
+            setMemberAddStatus({
+                attempted: uniqueMembers.length > 0,
+                succeeded: succeeded.map(m => `${m.name} (${m.role})`),
+                failed: failed.map(m => `${m.name} (${m.role})`),
+                projectGid,
+            });
+
+            // Build status message
+            let statusMsg = `✓ Created Asana project "${selectedProjectName}"`;
+            if (succeeded.length > 0) {
+                statusMsg += ` with members: ${succeeded.map(m => m.name).join(', ')}`;
+            }
+            setStatus(statusMsg);
+
+            if (failed.length > 0) {
+                setError(`Note: Failed to add some members: ${failed.map(m => m.name).join(', ')}. You can retry below.`);
+            }
+        } catch (err) {
+            setError(`Failed to create project: ${err.message}`);
+        } finally {
+            setCreatingProject(false);
+        }
+    }
+
+    // Retry adding members to an existing project
+    async function handleRetryAddMembers() {
+        if (!storedPat || !asanaProjectGid) return;
+
+        const membersToAdd = [
+            coordinatorMatch?.asanaUser ? { name: coordinatorMatch.asanaUser.name, gid: coordinatorMatch.asanaUser.gid, role: 'Coordinator' } : null,
+            ownerMatch?.asanaUser ? { name: ownerMatch.asanaUser.name, gid: ownerMatch.asanaUser.gid, role: 'Owner' } : null,
+        ].filter(Boolean);
+
+        const uniqueMembers = membersToAdd.filter((m, i, arr) =>
+            arr.findIndex(x => x.gid === m.gid) === i
+        );
+
+        if (uniqueMembers.length === 0) {
+            setError('No matched Asana users to add. Ensure Project Coordinator and/or Owner are set and matched.');
+            return;
+        }
+
+        setError(null);
+        setStatus(null);
+
+        try {
+            await addProjectMembers(storedPat, asanaProjectGid, uniqueMembers.map(m => m.gid));
+            setMemberAddStatus({
+                attempted: true,
+                succeeded: uniqueMembers.map(m => `${m.name} (${m.role})`),
+                failed: [],
+                projectGid: asanaProjectGid,
+            });
+            setStatus(`✓ Added members: ${uniqueMembers.map(m => m.name).join(', ')}`);
+        } catch (err) {
+            setError(`Failed to add members: ${err.message}`);
+        }
+    }
+
     // Create Asana task for a milestone
     async function handleCreateMilestoneTask(milestone, projectGid) {
         const milestoneId = milestone.id;
@@ -846,6 +1148,60 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                             </Box>
                         )}
 
+                        {/* Team GID Configuration */}
+                        {hasAsanaConfig && (
+                            <Box marginTop={3}>
+                                <Text size="small" fontWeight="strong" marginBottom={1}>
+                                    Asana Team GID
+                                </Text>
+                                {storedTeamGid ? (
+                                    <Box display="flex" alignItems="center">
+                                        <Text size="small" textColor="green" marginRight={2}>
+                                            ✓ Team GID: {storedTeamGid}
+                                        </Text>
+                                        <Button
+                                            onClick={async () => {
+                                                await globalConfig.setAsync(ASANA_TEAM_GID_KEY, undefined);
+                                            }}
+                                            icon="x"
+                                            variant="secondary"
+                                            size="small"
+                                        >
+                                            Clear
+                                        </Button>
+                                    </Box>
+                                ) : (
+                                    <Box>
+                                        <Box display="flex" alignItems="center" marginBottom={1}>
+                                            <Input
+                                                value={teamGidInput}
+                                                onChange={(e) => setTeamGidInput(e.target.value)}
+                                                placeholder="Enter Team GID..."
+                                                width="100%"
+                                            />
+                                            <Button
+                                                onClick={async () => {
+                                                    if (teamGidInput.trim()) {
+                                                        await globalConfig.setAsync(ASANA_TEAM_GID_KEY, teamGidInput.trim());
+                                                        setTeamGidInput('');
+                                                    }
+                                                }}
+                                                disabled={!teamGidInput.trim()}
+                                                variant="primary"
+                                                marginLeft={2}
+                                                size="small"
+                                            >
+                                                Save
+                                            </Button>
+                                        </Box>
+                                        <Text size="small" textColor="light">
+                                            Find your team GID in the URL: app.asana.com/0/TEAM_GID/...
+                                        </Text>
+                                    </Box>
+                                )}
+                            </Box>
+                        )}
+
                         {!asanaUrlField && milestonesTable && (
                             <Box
                                 marginTop={2}
@@ -874,6 +1230,7 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                         setMilestoneStatuses({});
                         setCoordinatorMatch(null);
                         setOwnerMatch(null);
+                        setMemberAddStatus(null);
                     }}
                     placeholder="Choose a project..."
                     width="100%"
@@ -929,22 +1286,43 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                     {/* Steps 1 & 2: Only show if Asana Board not already set */}
                     {!existingAsanaBoard && (
                         <>
-                            {/* Step 1: Open template */}
+                            {/* Step 1: Create project - via API if configured, otherwise open template */}
                             <Box marginBottom={3}>
                                 <Text marginBottom={2}>
-                                    <strong>Step 1:</strong> Create an Asana project for "{selectedProjectName}":
+                                    {hasFullAsanaConfig
+                                        ? `Create an Asana project for "${selectedProjectName}":`
+                                        : <><strong>Step 1:</strong> Create an Asana project for "{selectedProjectName}":</>
+                                    }
                                 </Text>
-                                <Button
-                                    onClick={() => window.open(ASANA_TEMPLATE_URL, '_blank')}
-                                    icon="share1"
-                                    variant="primary"
-                                    size="small"
-                                >
-                                    Open Asana Template
-                                </Button>
+                                {hasFullAsanaConfig ? (
+                                    <Button
+                                        onClick={handleCreateAsanaProject}
+                                        disabled={creatingProject}
+                                        icon={creatingProject ? undefined : 'plus'}
+                                        variant="primary"
+                                        size="small"
+                                    >
+                                        {creatingProject ? 'Creating Project...' : 'Create Asana Project'}
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        onClick={() => window.open(ASANA_TEMPLATE_URL, '_blank')}
+                                        icon="share1"
+                                        variant="primary"
+                                        size="small"
+                                    >
+                                        Open Asana Template
+                                    </Button>
+                                )}
+                                {hasAsanaConfig && !storedTeamGid && (
+                                    <Text size="small" textColor="orange" marginTop={1}>
+                                        Configure Team GID in Settings to enable one-click project creation
+                                    </Text>
+                                )}
                             </Box>
 
-                            {/* Step 2: Paste URL */}
+                            {/* Step 2: Paste URL - only show if not using API */}
+                            {!hasFullAsanaConfig && (
                             <Box marginBottom={3}>
                                 <Text marginBottom={2}>
                                     <strong>Step 2:</strong> Paste the new Asana board URL here:
@@ -970,6 +1348,7 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                                     </Button>
                                 </Box>
                             </Box>
+                            )}
                         </>
                     )}
 
@@ -1035,6 +1414,35 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                                     Tasks will be auto-assigned to Project Coordinator
                                 </Text>
                             )}
+
+                            {/* Add members button - show when board exists and users are matched */}
+                            {existingAsanaBoard && asanaProjectGid && (coordinatorMatch?.asanaUser || ownerMatch?.asanaUser) && (
+                                <Box marginTop={2}>
+                                    <Button
+                                        onClick={handleRetryAddMembers}
+                                        icon="user"
+                                        size="small"
+                                        variant="secondary"
+                                    >
+                                        Add/Update Project Members
+                                    </Button>
+                                </Box>
+                            )}
+                        </Box>
+                    )}
+
+                    {/* Show message when roles are missing */}
+                    {hasAsanaConfig && existingAsanaBoard && !coordinatorMatch && !ownerMatch && (
+                        <Box
+                            marginBottom={2}
+                            padding={2}
+                            backgroundColor={colors.YELLOW_LIGHT_2}
+                            borderRadius={2}
+                        >
+                            <Text size="small" textColor="orange">
+                                No Project Coordinator or Owner found for this project.
+                                Add them in Airtable to enable automatic Asana member assignment.
+                            </Text>
                         </Box>
                     )}
 
