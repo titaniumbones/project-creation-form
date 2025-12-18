@@ -14,7 +14,7 @@ import {
     Icon,
     colors,
 } from '@airtable/blocks/ui';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 
 // Asana template URL - update this to your template
 const ASANA_TEMPLATE_URL = 'https://app.asana.com/0/projects/new/project-template/1204221248144075';
@@ -51,22 +51,99 @@ async function validateAsanaPat(pat) {
     return data.data; // { gid, email, name, workspaces }
 }
 
+// Search Asana workspace users
+async function searchAsanaUsers(pat, workspaceGid) {
+    const response = await fetch(
+        `https://app.asana.com/api/1.0/workspaces/${workspaceGid}/users?opt_fields=name,email`,
+        {
+            headers: {
+                'Authorization': `Bearer ${pat}`,
+                'Content-Type': 'application/json',
+            },
+        }
+    );
+    if (!response.ok) {
+        throw new Error('Failed to fetch Asana users');
+    }
+    const data = await response.json();
+    return data.data; // Array of { gid, name, email }
+}
+
+// Fuzzy match a name against Asana users
+function findBestUserMatch(searchName, asanaUsers) {
+    if (!searchName || !asanaUsers?.length) return null;
+
+    const searchLower = searchName.toLowerCase().trim();
+    const searchParts = searchLower.split(/\s+/);
+
+    let bestMatch = null;
+    let bestScore = 0;
+
+    for (const user of asanaUsers) {
+        const userName = user.name?.toLowerCase() || '';
+        const userParts = userName.split(/\s+/);
+
+        // Exact match
+        if (userName === searchLower) {
+            return { user, score: 100, matchType: 'exact' };
+        }
+
+        // Check if all search parts are contained in user name
+        const allPartsMatch = searchParts.every((part) => userName.includes(part));
+        if (allPartsMatch) {
+            const score = 80 + (searchParts.length / userParts.length) * 10;
+            if (score > bestScore) {
+                bestScore = score;
+                bestMatch = { user, score, matchType: 'contains_all' };
+            }
+        }
+
+        // Check first + last name match
+        if (searchParts.length >= 2 && userParts.length >= 2) {
+            const firstMatch = userParts[0].startsWith(searchParts[0]) || searchParts[0].startsWith(userParts[0]);
+            const lastMatch = userParts[userParts.length - 1] === searchParts[searchParts.length - 1];
+            if (firstMatch && lastMatch) {
+                const score = 70;
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMatch = { user, score, matchType: 'first_last' };
+                }
+            }
+        }
+
+        // Partial match - any part matches
+        const anyPartMatch = searchParts.some((part) => userName.includes(part) && part.length > 2);
+        if (anyPartMatch && bestScore < 50) {
+            bestScore = 50;
+            bestMatch = { user, score: 50, matchType: 'partial' };
+        }
+    }
+
+    // Only return if score is reasonable
+    return bestScore >= 50 ? bestMatch : null;
+}
+
 // Create Asana task via API
-async function createAsanaTask(pat, projectGid, milestone) {
+async function createAsanaTask(pat, projectGid, milestone, assigneeGid = null) {
+    const taskData = {
+        name: milestone.name,
+        notes: milestone.description || '',
+        due_on: milestone.dueDate || null, // Format: "YYYY-MM-DD"
+        projects: [projectGid],
+    };
+
+    // Add assignee if provided
+    if (assigneeGid) {
+        taskData.assignee = assigneeGid;
+    }
+
     const response = await fetch('https://app.asana.com/api/1.0/tasks', {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${pat}`,
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-            data: {
-                name: milestone.name,
-                notes: milestone.description || '',
-                due_on: milestone.dueDate || null, // Format: "YYYY-MM-DD"
-                projects: [projectGid],
-            },
-        }),
+        body: JSON.stringify({ data: taskData }),
     });
 
     if (!response.ok) {
@@ -108,6 +185,11 @@ function ScopeOfWorkGenerator() {
     const [milestoneStatuses, setMilestoneStatuses] = useState({});
     // { milestoneId: { status: 'pending'|'creating'|'success'|'error', error: '...' } }
 
+    // Asana workspace and users cache (for coordinator lookup)
+    const [workspaceGid, setWorkspaceGid] = useState(null);
+    const [asanaUsers, setAsanaUsers] = useState([]);
+    const [coordinatorMatch, setCoordinatorMatch] = useState(null);
+
     // Get stored PAT from globalConfig
     const storedPat = globalConfig.get(ASANA_PAT_KEY);
     const hasAsanaConfig = !!storedPat;
@@ -140,6 +222,110 @@ function ScopeOfWorkGenerator() {
     const allMilestones = useRecords(milestonesTable, {
         fields: ['Milestone', 'Description', 'Due Date', 'Status', 'Project', 'Asana URL'],
     });
+
+    // Get Assignments table for coordinator lookup
+    const assignmentsTable = base.getTableByNameIfExists('Assignments');
+    const allAssignments = useRecords(assignmentsTable, {
+        fields: ['Role', 'Data Team Member', 'Project'],
+    });
+
+    // Get Data Team Members table to resolve names
+    const dataTeamMembersTable = base.getTableByNameIfExists('Data Team Members');
+    const allDataTeamMembers = useRecords(dataTeamMembersTable, {
+        fields: ['Full Name'],
+    });
+
+    // Memoize record IDs to create stable dependency references
+    // (useRecords returns new array refs on every render)
+    const assignmentIds = useMemo(
+        () => allAssignments?.map((a) => a.id).join(',') || '',
+        [allAssignments]
+    );
+    const teamMemberIds = useMemo(
+        () => allDataTeamMembers?.map((m) => m.id).join(',') || '',
+        [allDataTeamMembers]
+    );
+
+    // Validate PAT on initial load to get workspace GID
+    useEffect(() => {
+        async function initializeAsanaConnection() {
+            if (storedPat && !workspaceGid) {
+                try {
+                    const userData = await validateAsanaPat(storedPat);
+                    if (userData.workspaces?.length > 0) {
+                        setWorkspaceGid(userData.workspaces[0].gid);
+                    }
+                } catch {
+                    // PAT might be invalid/expired, user will need to reconfigure
+                }
+            }
+        }
+        initializeAsanaConnection();
+    }, [storedPat, workspaceGid]);
+
+    // Fetch Asana users when PAT and workspace are available
+    useEffect(() => {
+        async function fetchAsanaUsers() {
+            if (storedPat && workspaceGid && asanaUsers.length === 0) {
+                try {
+                    const users = await searchAsanaUsers(storedPat, workspaceGid);
+                    setAsanaUsers(users);
+                } catch {
+                    // Failed to fetch users, coordinator lookup won't work
+                }
+            }
+        }
+        fetchAsanaUsers();
+    }, [storedPat, workspaceGid, asanaUsers.length]);
+
+    // Find Project Coordinator for selected project
+    // NOTE: Using stable ID strings in deps instead of array refs to prevent infinite re-renders
+    useEffect(() => {
+        if (!selectedRecordId || !allAssignments || !allDataTeamMembers || asanaUsers.length === 0) {
+            setCoordinatorMatch(null);
+            return;
+        }
+
+        // Find assignments linked to this project with "Project Coordinator" role
+        const projectAssignments = allAssignments.filter((assignment) => {
+            const linkedProjects = assignment.getCellValue('Project') || [];
+            const role = assignment.getCellValueAsString('Role');
+            return (
+                linkedProjects.some((p) => p.id === selectedRecordId) &&
+                role?.toLowerCase().includes('project coordinator')
+            );
+        });
+
+        if (projectAssignments.length === 0) {
+            setCoordinatorMatch(null);
+            return;
+        }
+
+        // Get the coordinator's name from Data Team Member link
+        const coordinatorAssignment = projectAssignments[0];
+        const linkedMembers = coordinatorAssignment.getCellValue('Data Team Member') || [];
+        if (linkedMembers.length === 0) {
+            setCoordinatorMatch(null);
+            return;
+        }
+
+        // Look up the actual name from Data Team Members table
+        const memberRecord = allDataTeamMembers.find((m) => m.id === linkedMembers[0].id);
+        const coordinatorName = memberRecord?.getCellValueAsString('Full Name');
+
+        if (!coordinatorName) {
+            setCoordinatorMatch(null);
+            return;
+        }
+
+        // Find matching Asana user
+        const match = findBestUserMatch(coordinatorName, asanaUsers);
+        setCoordinatorMatch(
+            match
+                ? { name: coordinatorName, asanaUser: match.user, score: match.score, matchType: match.matchType }
+                : { name: coordinatorName, asanaUser: null, score: 0, matchType: 'no_match' }
+        );
+    }, [selectedRecordId, assignmentIds, teamMemberIds, asanaUsers.length]);
 
     if (!projectsTable) {
         return (
@@ -409,6 +595,12 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
         try {
             const userData = await validateAsanaPat(patInput.trim());
             await globalConfig.setAsync(ASANA_PAT_KEY, patInput.trim());
+
+            // Store workspace GID for user lookups
+            if (userData.workspaces?.length > 0) {
+                setWorkspaceGid(userData.workspaces[0].gid);
+            }
+
             setPatStatus({ type: 'success', message: `Connected as ${userData.name} (${userData.email})` });
             setPatInput(''); // Clear input after save
         } catch (err) {
@@ -421,6 +613,9 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
     // Clear stored PAT
     async function handleClearPat() {
         await globalConfig.setAsync(ASANA_PAT_KEY, undefined);
+        setWorkspaceGid(null);
+        setAsanaUsers([]);
+        setCoordinatorMatch(null);
         setPatStatus({ type: 'success', message: 'PAT removed' });
     }
 
@@ -440,7 +635,10 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                 dueDate: milestone.getCellValue('Due Date') || null,
             };
 
-            const { taskUrl } = await createAsanaTask(storedPat, projectGid, milestoneData);
+            // Use coordinator's Asana GID if we have a match
+            const assigneeGid = coordinatorMatch?.asanaUser?.gid || null;
+
+            const { taskUrl } = await createAsanaTask(storedPat, projectGid, milestoneData, assigneeGid);
 
             // Write task URL back to milestone record if field exists
             if (asanaUrlField && milestonesTable) {
@@ -454,7 +652,8 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                 [milestoneId]: { status: 'success', taskUrl },
             }));
 
-            setStatus(`✓ Created Asana task for "${milestoneData.name}"`);
+            const assigneeNote = assigneeGid ? ` (assigned to ${coordinatorMatch.asanaUser.name})` : '';
+            setStatus(`✓ Created Asana task for "${milestoneData.name}"${assigneeNote}`);
         } catch (err) {
             setMilestoneStatuses((prev) => ({
                 ...prev,
@@ -464,25 +663,34 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
         }
     }
 
-    // Build record options for select
-    const recordOptions = records
-        ? records.map((record) => ({
-              value: record.id,
-              label: record.getCellValueAsString('Project') || '(unnamed)',
-          }))
-        : [];
+    // Build record options for select (memoized)
+    const recordOptions = useMemo(
+        () =>
+            records?.map((record) => ({
+                value: record.id,
+                label: record.getCellValueAsString('Project') || '(unnamed)',
+            })) || [],
+        [records]
+    );
 
     // Get the currently selected record and its Asana Board value
-    const selectedRecord = selectedRecordId ? records?.find((r) => r.id === selectedRecordId) : null;
+    const selectedRecord = useMemo(
+        () => (selectedRecordId ? records?.find((r) => r.id === selectedRecordId) : null),
+        [selectedRecordId, records]
+    );
     const existingAsanaBoard = selectedRecord?.getCellValueAsString('Asana Board') || '';
     const asanaProjectGid = parseAsanaProjectGid(existingAsanaBoard);
     const selectedProjectName = selectedRecord?.getCellValueAsString('Project') || '';
 
-    // Get linked milestone records for the selected project (with full details)
-    const linkedMilestoneIds = selectedRecord?.getCellValue('Milestones')?.map((link) => link.id) || [];
-    const projectMilestones = allMilestones
-        ? allMilestones.filter((m) => linkedMilestoneIds.includes(m.id))
-        : [];
+    // Get linked milestone records for the selected project (memoized)
+    const linkedMilestoneIds = useMemo(
+        () => selectedRecord?.getCellValue('Milestones')?.map((link) => link.id) || [],
+        [selectedRecord]
+    );
+    const projectMilestones = useMemo(
+        () => allMilestones?.filter((m) => linkedMilestoneIds.includes(m.id)) || [],
+        [allMilestones, linkedMilestoneIds]
+    );
 
     // Legacy: names from rollup (fallback)
     const selectedMilestones = selectedRecord
@@ -617,6 +825,7 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                         setError(null);
                         setAsanaBoardUrl('');
                         setMilestoneStatuses({});
+                        setCoordinatorMatch(null);
                     }}
                     placeholder="Choose a project..."
                     width="100%"
@@ -728,6 +937,35 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                             >
                                 Open in Asana
                             </Button>
+                        </Box>
+                    )}
+
+                    {/* Coordinator assignment status */}
+                    {hasAsanaConfig && coordinatorMatch && (
+                        <Box
+                            marginBottom={2}
+                            padding={2}
+                            backgroundColor={coordinatorMatch.asanaUser ? colors.GREEN_LIGHT_2 : colors.YELLOW_LIGHT_2}
+                            borderRadius={2}
+                        >
+                            <Text size="small">
+                                <strong>Project Coordinator:</strong> {coordinatorMatch.name}
+                                {coordinatorMatch.asanaUser ? (
+                                    <span style={{ color: colors.GREEN }}>
+                                        {' '}→ {coordinatorMatch.asanaUser.name} in Asana
+                                        {coordinatorMatch.matchType !== 'exact' && ` (${coordinatorMatch.matchType} match)`}
+                                    </span>
+                                ) : (
+                                    <span style={{ color: colors.ORANGE }}>
+                                        {' '}(no matching Asana user found)
+                                    </span>
+                                )}
+                            </Text>
+                            {coordinatorMatch.asanaUser && (
+                                <Text size="small" textColor="light">
+                                    Tasks will be auto-assigned to this user
+                                </Text>
+                            )}
                         </Box>
                     )}
 
