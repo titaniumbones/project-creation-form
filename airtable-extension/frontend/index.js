@@ -20,9 +20,17 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 const ASANA_TEMPLATE_URL = 'https://app.asana.com/0/projects/new/project-template/1204221248144075';
 const ASANA_TEMPLATE_GID = '1204221248144075';
 
+// OAuth relay URL - update this after deploying to Netlify
+// Deploy the asana-oauth-relay project and set this to your Netlify URL
+const OAUTH_RELAY_URL = 'https://airtable-asana-integration-oauth.netlify.app';
+
 // GlobalConfig keys for Asana settings storage
 const ASANA_PAT_KEY = 'asanaPat';
 const ASANA_TEAM_GID_KEY = 'asanaTeamGid';
+// OAuth keys
+const ASANA_ACCESS_TOKEN_KEY = 'asanaAccessToken';
+const ASANA_REFRESH_TOKEN_KEY = 'asanaRefreshToken';
+const ASANA_TOKEN_EXPIRY_KEY = 'asanaTokenExpiry';
 
 // Parse Asana project GID from board URL
 // Supports: /0/PROJECT_GID/... and /1/WORKSPACE/project/PROJECT_GID/...
@@ -321,6 +329,60 @@ async function addProjectMembers(pat, projectGid, memberGids) {
     return true;
 }
 
+// Get valid access token - refreshes if needed, falls back to PAT
+async function getValidAccessToken(globalConfig) {
+    const storedPat = globalConfig.get(ASANA_PAT_KEY);
+    const storedRefreshToken = globalConfig.get(ASANA_REFRESH_TOKEN_KEY);
+    const storedAccessToken = globalConfig.get(ASANA_ACCESS_TOKEN_KEY);
+    const storedTokenExpiry = globalConfig.get(ASANA_TOKEN_EXPIRY_KEY);
+
+    // If no OAuth tokens, fall back to PAT
+    if (!storedRefreshToken) {
+        return storedPat || null;
+    }
+
+    // Check if token is still valid (with 1 minute buffer)
+    if (storedTokenExpiry && Date.now() < storedTokenExpiry - 60000) {
+        return storedAccessToken;
+    }
+
+    // Need to refresh the token
+    if (!OAUTH_RELAY_URL) {
+        console.warn('[OAuth] No OAUTH_RELAY_URL configured, falling back to PAT');
+        return storedPat || null;
+    }
+
+    try {
+        const response = await fetch(`${OAUTH_RELAY_URL}/.netlify/functions/asana-refresh`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: storedRefreshToken }),
+        });
+
+        const tokens = await response.json();
+        if (tokens.error) {
+            console.error('[OAuth] Token refresh failed:', tokens.error);
+            // Clear invalid OAuth tokens and fall back to PAT
+            await globalConfig.setAsync(ASANA_ACCESS_TOKEN_KEY, undefined);
+            await globalConfig.setAsync(ASANA_REFRESH_TOKEN_KEY, undefined);
+            await globalConfig.setAsync(ASANA_TOKEN_EXPIRY_KEY, undefined);
+            return storedPat || null;
+        }
+
+        // Save new tokens
+        await globalConfig.setAsync(ASANA_ACCESS_TOKEN_KEY, tokens.access_token);
+        await globalConfig.setAsync(ASANA_TOKEN_EXPIRY_KEY, Date.now() + tokens.expires_in * 1000);
+        if (tokens.refresh_token) {
+            await globalConfig.setAsync(ASANA_REFRESH_TOKEN_KEY, tokens.refresh_token);
+        }
+
+        return tokens.access_token;
+    } catch (err) {
+        console.error('[OAuth] Token refresh error:', err);
+        return storedPat || null;
+    }
+}
+
 function ScopeOfWorkGenerator() {
     const base = useBase();
     const globalConfig = useGlobalConfig();
@@ -354,8 +416,16 @@ function ScopeOfWorkGenerator() {
     // Get stored settings from globalConfig
     const storedPat = globalConfig.get(ASANA_PAT_KEY);
     const storedTeamGid = globalConfig.get(ASANA_TEAM_GID_KEY);
-    const hasAsanaConfig = !!storedPat;
-    const hasFullAsanaConfig = !!storedPat && !!storedTeamGid;
+    // OAuth tokens
+    const storedAccessToken = globalConfig.get(ASANA_ACCESS_TOKEN_KEY);
+    const storedRefreshToken = globalConfig.get(ASANA_REFRESH_TOKEN_KEY);
+    const storedTokenExpiry = globalConfig.get(ASANA_TOKEN_EXPIRY_KEY);
+    const hasOAuthConfig = !!storedRefreshToken;
+    const hasAsanaConfig = !!storedPat || hasOAuthConfig;
+    const hasFullAsanaConfig = hasAsanaConfig && !!storedTeamGid;
+
+    // OAuth state
+    const [isConnectingOAuth, setIsConnectingOAuth] = useState(false);
 
     // Get the Projects table
     const projectsTable = base.getTableByNameIfExists('Projects');
@@ -414,29 +484,34 @@ function ScopeOfWorkGenerator() {
         [allDataTeamMembers]
     );
 
-    // Validate PAT on initial load to get workspace GID
+    // Validate PAT/OAuth on initial load to get workspace GID
     useEffect(() => {
         async function initializeAsanaConnection() {
-            if (storedPat && !workspaceGid) {
-                try {
-                    const userData = await validateAsanaPat(storedPat);
-                    if (userData.workspaces?.length > 0) {
-                        setWorkspaceGid(userData.workspaces[0].gid);
+            if (!workspaceGid) {
+                // Try OAuth tokens first, then fall back to PAT
+                const tokenToUse = storedAccessToken || storedPat;
+                if (tokenToUse) {
+                    try {
+                        const userData = await validateAsanaPat(tokenToUse);
+                        if (userData.workspaces?.length > 0) {
+                            setWorkspaceGid(userData.workspaces[0].gid);
+                        }
+                    } catch {
+                        // Token might be invalid/expired, user will need to reconfigure
                     }
-                } catch {
-                    // PAT might be invalid/expired, user will need to reconfigure
                 }
             }
         }
         initializeAsanaConnection();
-    }, [storedPat, workspaceGid]);
+    }, [storedPat, storedAccessToken, workspaceGid]);
 
-    // Fetch Asana users when PAT and workspace are available
+    // Fetch Asana users when token and workspace are available
     useEffect(() => {
         async function fetchAsanaUsers() {
-            if (storedPat && workspaceGid && asanaUsers.length === 0) {
+            const tokenToUse = storedAccessToken || storedPat;
+            if (tokenToUse && workspaceGid && asanaUsers.length === 0) {
                 try {
-                    const users = await searchAsanaUsers(storedPat, workspaceGid);
+                    const users = await searchAsanaUsers(tokenToUse, workspaceGid);
                     setAsanaUsers(users);
                 } catch {
                     // Failed to fetch users, coordinator lookup won't work
@@ -444,7 +519,7 @@ function ScopeOfWorkGenerator() {
             }
         }
         fetchAsanaUsers();
-    }, [storedPat, workspaceGid, asanaUsers.length]);
+    }, [storedPat, storedAccessToken, workspaceGid, asanaUsers.length]);
 
     // Find Project Coordinator for selected project
     // NOTE: Using stable ID strings in deps instead of array refs to prevent infinite re-renders
@@ -828,14 +903,87 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
         setPatStatus({ type: 'success', message: 'PAT removed' });
     }
 
+    // OAuth login handler
+    function handleAsanaOAuthLogin() {
+        if (!OAUTH_RELAY_URL) {
+            setPatStatus({ type: 'error', message: 'OAuth relay URL not configured. Please deploy the asana-oauth-relay project first.' });
+            return;
+        }
+
+        setIsConnectingOAuth(true);
+        setPatStatus(null);
+
+        const popup = window.open(
+            `${OAUTH_RELAY_URL}/.netlify/functions/asana-auth`,
+            'asana-auth',
+            'width=600,height=700'
+        );
+
+        const messageHandler = async (event) => {
+            // Ignore messages from other origins
+            if (event.origin !== OAUTH_RELAY_URL) return;
+
+            window.removeEventListener('message', messageHandler);
+            setIsConnectingOAuth(false);
+
+            if (event.data.error) {
+                setPatStatus({ type: 'error', message: `OAuth failed: ${event.data.error}` });
+                return;
+            }
+
+            const { access_token, refresh_token, expires_in } = event.data;
+
+            try {
+                // Save OAuth tokens
+                await globalConfig.setAsync(ASANA_ACCESS_TOKEN_KEY, access_token);
+                await globalConfig.setAsync(ASANA_REFRESH_TOKEN_KEY, refresh_token);
+                await globalConfig.setAsync(ASANA_TOKEN_EXPIRY_KEY, Date.now() + expires_in * 1000);
+
+                // Validate and get user info
+                const userData = await validateAsanaPat(access_token);
+                if (userData.workspaces?.length > 0) {
+                    setWorkspaceGid(userData.workspaces[0].gid);
+                }
+
+                setPatStatus({ type: 'success', message: `Connected as ${userData.name} (${userData.email}) via OAuth` });
+            } catch (err) {
+                setPatStatus({ type: 'error', message: `OAuth error: ${err.message}` });
+            }
+        };
+
+        window.addEventListener('message', messageHandler);
+
+        // Handle popup closed without completing auth
+        const checkClosed = setInterval(() => {
+            if (popup?.closed) {
+                clearInterval(checkClosed);
+                window.removeEventListener('message', messageHandler);
+                setIsConnectingOAuth(false);
+            }
+        }, 500);
+    }
+
+    // Disconnect OAuth
+    async function handleDisconnectOAuth() {
+        await globalConfig.setAsync(ASANA_ACCESS_TOKEN_KEY, undefined);
+        await globalConfig.setAsync(ASANA_REFRESH_TOKEN_KEY, undefined);
+        await globalConfig.setAsync(ASANA_TOKEN_EXPIRY_KEY, undefined);
+        setWorkspaceGid(null);
+        setAsanaUsers([]);
+        setCoordinatorMatch(null);
+        setOwnerMatch(null);
+        setPatStatus({ type: 'success', message: 'OAuth disconnected' });
+    }
+
     // Track member addition status
     const [memberAddStatus, setMemberAddStatus] = useState(null);
     // { attempted: boolean, succeeded: string[], failed: string[], projectGid: string }
 
     // Create Asana project from template with team members
     async function handleCreateAsanaProject() {
-        if (!storedPat || !storedTeamGid) {
-            setError('Asana PAT and Team GID must be configured in Settings');
+        const tokenToUse = storedAccessToken || storedPat;
+        if (!tokenToUse || !storedTeamGid) {
+            setError('Asana connection and Team GID must be configured in Settings');
             return;
         }
 
@@ -870,7 +1018,7 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
 
             // 1. Create project from template with role assignments
             const projectGid = await createProjectFromTemplate(
-                storedPat,
+                tokenToUse,
                 ASANA_TEMPLATE_GID,
                 selectedProjectName,
                 storedTeamGid,
@@ -901,7 +1049,7 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
 
             if (uniqueMembers.length > 0) {
                 try {
-                    await addProjectMembers(storedPat, projectGid, uniqueMembers.map(m => m.gid));
+                    await addProjectMembers(tokenToUse, projectGid, uniqueMembers.map(m => m.gid));
                     succeeded.push(...uniqueMembers);
                 } catch (memberErr) {
                     console.error('[Asana API] Failed to add members:', memberErr);
@@ -935,7 +1083,8 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
 
     // Retry adding members to an existing project
     async function handleRetryAddMembers() {
-        if (!storedPat || !asanaProjectGid) return;
+        const tokenToUse = storedAccessToken || storedPat;
+        if (!tokenToUse || !asanaProjectGid) return;
 
         const membersToAdd = [
             coordinatorMatch?.asanaUser ? { name: coordinatorMatch.asanaUser.name, gid: coordinatorMatch.asanaUser.gid, role: 'Coordinator' } : null,
@@ -955,7 +1104,7 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
         setStatus(null);
 
         try {
-            await addProjectMembers(storedPat, asanaProjectGid, uniqueMembers.map(m => m.gid));
+            await addProjectMembers(tokenToUse, asanaProjectGid, uniqueMembers.map(m => m.gid));
             setMemberAddStatus({
                 attempted: true,
                 succeeded: uniqueMembers.map(m => `${m.name} (${m.role})`),
@@ -971,6 +1120,7 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
     // Create Asana task for a milestone
     async function handleCreateMilestoneTask(milestone, projectGid) {
         const milestoneId = milestone.id;
+        const tokenToUse = storedAccessToken || storedPat;
 
         setMilestoneStatuses((prev) => ({
             ...prev,
@@ -987,7 +1137,7 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
             // Use coordinator's Asana GID if we have a match
             const assigneeGid = coordinatorMatch?.asanaUser?.gid || null;
 
-            const { taskUrl } = await createAsanaTask(storedPat, projectGid, milestoneData, assigneeGid);
+            const { taskUrl } = await createAsanaTask(tokenToUse, projectGid, milestoneData, assigneeGid);
 
             // Write task URL back to milestone record if field exists
             if (asanaUrlField && milestonesTable) {
@@ -1082,56 +1232,102 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                             Asana API Configuration
                         </Heading>
 
-                        {hasAsanaConfig ? (
-                            <Box>
+                        {/* OAuth Connection (preferred) */}
+                        {hasOAuthConfig ? (
+                            <Box marginBottom={3}>
                                 <Text marginBottom={2} textColor="green">
-                                    ✓ Asana PAT configured
+                                    ✓ Connected via OAuth
                                 </Text>
                                 <Button
-                                    onClick={handleClearPat}
+                                    onClick={handleDisconnectOAuth}
                                     icon="x"
                                     variant="danger"
                                     size="small"
                                 >
-                                    Remove PAT
+                                    Disconnect
                                 </Button>
                             </Box>
-                        ) : (
-                            <Box>
+                        ) : OAUTH_RELAY_URL ? (
+                            <Box marginBottom={3}>
                                 <Text size="small" marginBottom={2}>
-                                    Enter your Asana Personal Access Token to enable direct task creation.
+                                    Connect to Asana using OAuth (recommended):
                                 </Text>
-                                <Text size="small" textColor="light" marginBottom={2}>
-                                    Get a PAT from{' '}
-                                    <a
-                                        href="https://app.asana.com/0/developer-console"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                    >
-                                        Asana Developer Console
-                                    </a>
-                                </Text>
-                                <Box display="flex" alignItems="center" marginBottom={2}>
-                                    <Input
-                                        type="password"
-                                        value={patInput}
-                                        onChange={(e) => setPatInput(e.target.value)}
-                                        placeholder="Enter PAT..."
-                                        width="100%"
-                                    />
-                                    <Button
-                                        onClick={handleTestAndSavePat}
-                                        disabled={!patInput || isTestingPat}
-                                        variant="primary"
-                                        marginLeft={2}
-                                        size="small"
-                                    >
-                                        {isTestingPat ? 'Testing...' : 'Save'}
-                                    </Button>
-                                </Box>
-                                <Text size="small" textColor="orange">
-                                    ⚠️ Note: PAT is stored in base config and visible to all collaborators.
-                                </Text>
+                                <Button
+                                    onClick={handleAsanaOAuthLogin}
+                                    disabled={isConnectingOAuth}
+                                    icon={isConnectingOAuth ? undefined : 'user'}
+                                    variant="primary"
+                                    size="small"
+                                >
+                                    {isConnectingOAuth ? 'Connecting...' : 'Connect to Asana'}
+                                </Button>
+                            </Box>
+                        ) : null}
+
+                        {/* PAT Connection (fallback) */}
+                        {!hasOAuthConfig && (
+                            <Box>
+                                {OAUTH_RELAY_URL && (
+                                    <Text size="small" textColor="light" marginBottom={2}>
+                                        Or use a Personal Access Token:
+                                    </Text>
+                                )}
+                                {hasAsanaConfig && storedPat ? (
+                                    <Box>
+                                        <Text marginBottom={2} textColor="green">
+                                            ✓ Asana PAT configured
+                                        </Text>
+                                        <Button
+                                            onClick={handleClearPat}
+                                            icon="x"
+                                            variant="danger"
+                                            size="small"
+                                        >
+                                            Remove PAT
+                                        </Button>
+                                    </Box>
+                                ) : !hasOAuthConfig && (
+                                    <Box>
+                                        <Text size="small" marginBottom={2}>
+                                            {OAUTH_RELAY_URL
+                                                ? 'Enter your Asana Personal Access Token:'
+                                                : 'Enter your Asana Personal Access Token to enable direct task creation.'}
+                                        </Text>
+                                        {!OAUTH_RELAY_URL && (
+                                            <Text size="small" textColor="light" marginBottom={2}>
+                                                Get a PAT from{' '}
+                                                <a
+                                                    href="https://app.asana.com/0/developer-console"
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                >
+                                                    Asana Developer Console
+                                                </a>
+                                            </Text>
+                                        )}
+                                        <Box display="flex" alignItems="center" marginBottom={2}>
+                                            <Input
+                                                type="password"
+                                                value={patInput}
+                                                onChange={(e) => setPatInput(e.target.value)}
+                                                placeholder="Enter PAT..."
+                                                width="100%"
+                                            />
+                                            <Button
+                                                onClick={handleTestAndSavePat}
+                                                disabled={!patInput || isTestingPat}
+                                                variant="primary"
+                                                marginLeft={2}
+                                                size="small"
+                                            >
+                                                {isTestingPat ? 'Testing...' : 'Save'}
+                                            </Button>
+                                        </Box>
+                                        <Text size="small" textColor="orange">
+                                            ⚠️ Note: PAT is stored in base config and visible to all collaborators.
+                                        </Text>
+                                    </Box>
+                                )}
                             </Box>
                         )}
 

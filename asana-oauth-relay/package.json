@@ -1,0 +1,12 @@
+{
+  "name": "asana-oauth-relay",
+  "version": "1.0.0",
+  "description": "OAuth relay service for Asana integration with Airtable extension",
+  "private": true,
+  "scripts": {
+    "dev": "netlify dev",
+    "deploy": "netlify deploy --prod"
+  },
+  "keywords": ["asana", "oauth", "netlify"],
+  "license": "MIT"
+}
