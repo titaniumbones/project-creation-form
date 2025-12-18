@@ -395,9 +395,7 @@ function ScopeOfWorkGenerator() {
 
     // Settings state
     const [showSettings, setShowSettings] = useState(false);
-    const [patInput, setPatInput] = useState('');
-    const [isTestingPat, setIsTestingPat] = useState(false);
-    const [patStatus, setPatStatus] = useState(null);
+    const [patStatus, setPatStatus] = useState(null); // Reused for OAuth status messages
 
     // Milestone creation state
     const [milestoneStatuses, setMilestoneStatuses] = useState({});
@@ -414,14 +412,14 @@ function ScopeOfWorkGenerator() {
     const [teamGidInput, setTeamGidInput] = useState('');
 
     // Get stored settings from globalConfig
-    const storedPat = globalConfig.get(ASANA_PAT_KEY);
+    const storedPat = globalConfig.get(ASANA_PAT_KEY); // Legacy, kept for backward compatibility
     const storedTeamGid = globalConfig.get(ASANA_TEAM_GID_KEY);
     // OAuth tokens
     const storedAccessToken = globalConfig.get(ASANA_ACCESS_TOKEN_KEY);
     const storedRefreshToken = globalConfig.get(ASANA_REFRESH_TOKEN_KEY);
     const storedTokenExpiry = globalConfig.get(ASANA_TOKEN_EXPIRY_KEY);
     const hasOAuthConfig = !!storedRefreshToken;
-    const hasAsanaConfig = !!storedPat || hasOAuthConfig;
+    const hasAsanaConfig = hasOAuthConfig; // OAuth only now
     const hasFullAsanaConfig = hasAsanaConfig && !!storedTeamGid;
 
     // OAuth state
@@ -865,43 +863,10 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
         }
     }
 
-    // Test and save Asana PAT
-    async function handleTestAndSavePat() {
-        if (!patInput.trim()) {
-            setPatStatus({ type: 'error', message: 'Please enter a PAT' });
-            return;
-        }
-
-        setIsTestingPat(true);
-        setPatStatus(null);
-
-        try {
-            const userData = await validateAsanaPat(patInput.trim());
-            await globalConfig.setAsync(ASANA_PAT_KEY, patInput.trim());
-
-            // Store workspace GID for user lookups
-            if (userData.workspaces?.length > 0) {
-                setWorkspaceGid(userData.workspaces[0].gid);
-            }
-
-            setPatStatus({ type: 'success', message: `Connected as ${userData.name} (${userData.email})` });
-            setPatInput(''); // Clear input after save
-        } catch (err) {
-            setPatStatus({ type: 'error', message: err.message });
-        } finally {
-            setIsTestingPat(false);
-        }
-    }
-
-    // Clear stored PAT
-    async function handleClearPat() {
-        await globalConfig.setAsync(ASANA_PAT_KEY, undefined);
-        setWorkspaceGid(null);
-        setAsanaUsers([]);
-        setCoordinatorMatch(null);
-        setOwnerMatch(null);
-        setPatStatus({ type: 'success', message: 'PAT removed' });
-    }
+    // PAT handlers removed - OAuth only
+    // Legacy PAT code commented out for reference:
+    // async function handleTestAndSavePat() { ... }
+    // async function handleClearPat() { ... }
 
     // OAuth login handler
     function handleAsanaOAuthLogin() {
@@ -1202,11 +1167,11 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
     return (
         <Box padding={3}>
             <Heading size="large" marginBottom={2}>
-                Scope of Work Generator
+                Project Creation Helper
             </Heading>
 
             <Text marginBottom={3} textColor="light">
-                Select a project to link its Asana board and generate Scope of Work documentation.
+                Select a project to create and link its Asana board.
             </Text>
 
             {/* Settings Section */}
@@ -1264,72 +1229,7 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                             </Box>
                         ) : null}
 
-                        {/* PAT Connection (fallback) */}
-                        {!hasOAuthConfig && (
-                            <Box>
-                                {OAUTH_RELAY_URL && (
-                                    <Text size="small" textColor="light" marginBottom={2}>
-                                        Or use a Personal Access Token:
-                                    </Text>
-                                )}
-                                {hasAsanaConfig && storedPat ? (
-                                    <Box>
-                                        <Text marginBottom={2} textColor="green">
-                                            ✓ Asana PAT configured
-                                        </Text>
-                                        <Button
-                                            onClick={handleClearPat}
-                                            icon="x"
-                                            variant="danger"
-                                            size="small"
-                                        >
-                                            Remove PAT
-                                        </Button>
-                                    </Box>
-                                ) : !hasOAuthConfig && (
-                                    <Box>
-                                        <Text size="small" marginBottom={2}>
-                                            {OAUTH_RELAY_URL
-                                                ? 'Enter your Asana Personal Access Token:'
-                                                : 'Enter your Asana Personal Access Token to enable direct task creation.'}
-                                        </Text>
-                                        {!OAUTH_RELAY_URL && (
-                                            <Text size="small" textColor="light" marginBottom={2}>
-                                                Get a PAT from{' '}
-                                                <a
-                                                    href="https://app.asana.com/0/developer-console"
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                >
-                                                    Asana Developer Console
-                                                </a>
-                                            </Text>
-                                        )}
-                                        <Box display="flex" alignItems="center" marginBottom={2}>
-                                            <Input
-                                                type="password"
-                                                value={patInput}
-                                                onChange={(e) => setPatInput(e.target.value)}
-                                                placeholder="Enter PAT..."
-                                                width="100%"
-                                            />
-                                            <Button
-                                                onClick={handleTestAndSavePat}
-                                                disabled={!patInput || isTestingPat}
-                                                variant="primary"
-                                                marginLeft={2}
-                                                size="small"
-                                            >
-                                                {isTestingPat ? 'Testing...' : 'Save'}
-                                            </Button>
-                                        </Box>
-                                        <Text size="small" textColor="orange">
-                                            ⚠️ Note: PAT is stored in base config and visible to all collaborators.
-                                        </Text>
-                                    </Box>
-                                )}
-                            </Box>
-                        )}
+                        {/* PAT support removed - OAuth only */}
 
                         {patStatus && (
                             <Box

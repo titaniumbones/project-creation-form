@@ -1,7 +1,7 @@
 {
-    "name": "scope-of-work-generator",
+    "name": "project-creation-helper",
     "version": "1.0.0",
-    "description": "Generate Scope of Work documents for projects",
+    "description": "Create and manage Asana projects from Airtable",
     "scripts": {
         "start": "block run",
         "release": "block release"
