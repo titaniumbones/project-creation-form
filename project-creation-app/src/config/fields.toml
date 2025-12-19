@@ -1,0 +1,164 @@
+# Field configuration for the project creation form
+# Edit this file to add/remove/modify form fields
+# Changes here will automatically update the form and API mappings
+
+[metadata]
+version = "1.0"
+last_updated = "2025-12-19"
+
+# =============================================================================
+# BASIC FIELDS
+# =============================================================================
+
+[fields.project_name]
+type = "text"
+label = "Project Name"
+required = true
+placeholder = "Enter a descriptive project name"
+help_file = "project-name.md"
+section = "basics"
+# Integration mappings
+airtable_field = "Project"
+asana_field = "name"
+google_placeholder = "{{PROJECT_NAME}}"
+
+[fields.project_acronym]
+type = "text"
+label = "Project Acronym"
+required = false
+placeholder = "e.g., CDAI-2025"
+max_length = 20
+help_file = "project-acronym.md"
+section = "basics"
+airtable_field = "Project Acronym"
+google_placeholder = "{{PROJECT_ACRONYM}}"
+
+[fields.start_date]
+type = "date"
+label = "Start Date"
+required = true
+help_file = "dates.md"
+section = "basics"
+airtable_field = "Start Date"
+asana_field = "start_on"
+google_placeholder = "{{START_DATE}}"
+
+[fields.end_date]
+type = "date"
+label = "End Date"
+required = true
+section = "basics"
+airtable_field = "End Date"
+asana_field = "due_on"
+google_placeholder = "{{END_DATE}}"
+
+# =============================================================================
+# DESCRIPTION FIELDS
+# =============================================================================
+
+[fields.project_description]
+type = "richtext"
+label = "Project Description"
+required = true
+placeholder = "Describe the project scope, context, and approach..."
+help_file = "project-description.md"
+section = "description"
+min_length = 100
+airtable_field = "Project Description"
+google_placeholder = "{{PROJECT_DESCRIPTION}}"
+
+[fields.objectives]
+type = "richtext"
+label = "Objectives"
+required = true
+placeholder = "List the key objectives this project aims to achieve..."
+help_file = "objectives.md"
+section = "description"
+airtable_field = "Objectives"
+google_placeholder = "{{OBJECTIVES}}"
+
+# =============================================================================
+# TEAM ROLES
+# =============================================================================
+
+[fields.roles]
+type = "role_assignment"
+label = "Project Team"
+required = true
+help_file = "roles.md"
+section = "team"
+# Team members populated from Airtable
+team_members_table = "Data Team Members"
+team_members_field = "Full Name"
+
+[fields.roles.role_types.project_owner]
+label = "Project Owner"
+required = true
+max = 1
+description = "Primary decision maker and accountable party"
+
+[fields.roles.role_types.project_coordinator]
+label = "Project Coordinator"
+required = true
+max = 1
+description = "Day-to-day management and coordination"
+
+[fields.roles.role_types.technical_support]
+label = "Technical Support"
+required = false
+max = 3
+description = "Technical implementation and data work"
+
+[fields.roles.role_types.comms_support]
+label = "Communications Support"
+required = false
+max = 2
+description = "External communications and stakeholder engagement"
+
+[fields.roles.role_types.oversight]
+label = "Oversight"
+required = false
+max = 2
+description = "Strategic oversight and guidance"
+
+[fields.roles.role_types.other]
+label = "Other"
+required = false
+max = 5
+description = "Additional team members"
+
+# =============================================================================
+# OUTCOMES / MILESTONES
+# =============================================================================
+
+[fields.outcomes]
+type = "repeatable"
+label = "Outcomes & Milestones"
+required = true
+min_items = 1
+max_items = 20
+help_file = "outcomes.md"
+section = "outcomes"
+# Maps to Airtable Milestones table
+airtable_table = "Milestones"
+
+[fields.outcomes.subfields.name]
+type = "text"
+label = "Outcome Name"
+required = true
+placeholder = "e.g., Data Collection Complete"
+airtable_field = "Milestone"
+google_placeholder = "{{MILESTONE_NAME}}"
+
+[fields.outcomes.subfields.description]
+type = "textarea"
+label = "Description"
+required = false
+placeholder = "Brief description of this outcome..."
+airtable_field = "Description"
+
+[fields.outcomes.subfields.due_date]
+type = "date"
+label = "Due Date"
+required = false
+airtable_field = "Due Date"
