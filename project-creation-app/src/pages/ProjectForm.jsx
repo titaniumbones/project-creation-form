@@ -13,10 +13,62 @@ import {
   PlusIcon,
   TrashIcon,
   CheckCircleIcon,
+  ArrowPathIcon,
+  ArrowTopRightOnSquareIcon,
 } from '@heroicons/react/24/outline';
 
 // Draft storage key
 const DRAFT_KEY = 'project_creator_draft';
+const CREATED_RESOURCES_KEY = 'project_creator_resources';
+
+// Action button component for individual steps
+function ActionButton({ label, onClick, isLoading, isComplete, url, disabled, error }) {
+  return (
+    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+      <div className="flex items-center space-x-3">
+        {isComplete ? (
+          <CheckCircleIcon className="w-5 h-5 text-green-500" />
+        ) : (
+          <div className="w-5 h-5 rounded-full border-2 border-gray-300" />
+        )}
+        <span className={`font-medium ${isComplete ? 'text-green-700' : 'text-gray-700'}`}>
+          {label}
+        </span>
+      </div>
+      <div className="flex items-center space-x-2">
+        {url && (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:text-blue-800"
+          >
+            <ArrowTopRightOnSquareIcon className="w-5 h-5" />
+          </a>
+        )}
+        <button
+          type="button"
+          onClick={onClick}
+          disabled={disabled || isLoading}
+          className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+            isComplete
+              ? 'bg-green-100 text-green-700 hover:bg-green-200'
+              : 'bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed'
+          }`}
+        >
+          {isLoading ? (
+            <ArrowPathIcon className="w-4 h-4 animate-spin" />
+          ) : isComplete ? (
+            'Recreate'
+          ) : (
+            'Create'
+          )}
+        </button>
+      </div>
+      {error && <p className="text-sm text-red-600 mt-1">{error}</p>}
+    </div>
+  );
+}
 
 // Section progress indicator
 function ProgressIndicator({ sections, currentSection }) {
@@ -76,8 +128,38 @@ function FormField({ label, required, helpFile, error, children }) {
 export default function ProjectForm() {
   const navigate = useNavigate();
   const [currentSection, setCurrentSection] = useState('basics');
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
+
+  // Track which action is currently loading
+  const [loadingAction, setLoadingAction] = useState(null);
+
+  // Track created resources
+  const [createdResources, setCreatedResources] = useState(() => {
+    const saved = localStorage.getItem(CREATED_RESOURCES_KEY);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return {};
+      }
+    }
+    return {};
+  });
+
+  // Save created resources to localStorage
+  const updateCreatedResources = (updates) => {
+    setCreatedResources((prev) => {
+      const next = { ...prev, ...updates };
+      localStorage.setItem(CREATED_RESOURCES_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  // Clear all created resources (for starting fresh)
+  const clearCreatedResources = () => {
+    setCreatedResources({});
+    localStorage.removeItem(CREATED_RESOURCES_KEY);
+  };
 
   const connectionStatus = getConnectionStatus();
   const isConnected = connectionStatus.airtable;
@@ -170,21 +252,209 @@ export default function ProjectForm() {
     return () => observer.disconnect();
   }, []);
 
-  // Form submission
-  const onSubmit = async (data) => {
-    setIsSubmitting(true);
+  // Get current form data
+  const getFormData = () => watchedValues;
+
+  // === INDIVIDUAL ACTION HANDLERS ===
+
+  // 1. Create Asana Board (from template)
+  const handleCreateAsanaBoard = async () => {
+    const data = getFormData();
+    setLoadingAction('asanaBoard');
     setSubmitError(null);
 
-    const results = {
-      projectName: data.projectName,
-      airtableUrl: null,
-      asanaUrl: null,
-      driveUrl: null,
-      deckUrl: null,
-    };
+    try {
+      const asanaTemplateGid = import.meta.env.VITE_ASANA_TEMPLATE_GID;
+      const asanaTeamGid = import.meta.env.VITE_ASANA_TEAM_GID;
+
+      if (!asanaTemplateGid || !asanaTeamGid) {
+        throw new Error('Asana template or team GID not configured');
+      }
+
+      // Get coordinator name for Asana user matching
+      const coordinatorId = data.roles.project_coordinator?.memberId;
+      const coordinatorMember = teamMembers.find(m => m.id === coordinatorId);
+
+      // Get Asana users for matching
+      const user = await asana.getCurrentUser();
+      const workspaceGid = user.workspaces?.[0]?.gid;
+      let asanaUsers = [];
+      if (workspaceGid) {
+        asanaUsers = await asana.getWorkspaceUsers(workspaceGid);
+      }
+
+      // Build role assignments for Asana
+      const asanaRoleAssignments = [];
+      if (coordinatorMember) {
+        const match = asana.findBestUserMatch(coordinatorMember.name, asanaUsers);
+        if (match?.user?.gid) {
+          asanaRoleAssignments.push({ roleName: 'coordinator', userGid: match.user.gid });
+        }
+      }
+
+      const ownerId = data.roles.project_owner?.memberId;
+      const ownerMember = teamMembers.find(m => m.id === ownerId);
+      if (ownerMember) {
+        const match = asana.findBestUserMatch(ownerMember.name, asanaUsers);
+        if (match?.user?.gid) {
+          asanaRoleAssignments.push({ roleName: 'owner', userGid: match.user.gid });
+        }
+      }
+
+      const asanaProjectGid = await asana.createProjectFromTemplate(
+        asanaTemplateGid,
+        data.projectName,
+        asanaTeamGid,
+        data.startDate,
+        asanaRoleAssignments
+      );
+
+      const asanaUrl = asana.getProjectUrl(asanaProjectGid);
+      updateCreatedResources({ asanaProjectGid, asanaUrl });
+    } catch (err) {
+      setSubmitError(`Asana Board: ${err.message}`);
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  // 2. Create Asana Milestone Tickets (from outcomes)
+  const handleCreateAsanaMilestones = async () => {
+    const data = getFormData();
+    setLoadingAction('asanaMilestones');
+    setSubmitError(null);
 
     try {
-      // 1. Create Airtable project record
+      if (!createdResources.asanaProjectGid) {
+        throw new Error('Create Asana Board first');
+      }
+
+      const validOutcomes = data.outcomes.filter(o => o.name?.trim());
+      if (validOutcomes.length === 0) {
+        throw new Error('No outcomes to create');
+      }
+
+      // Create tasks for each outcome
+      for (const outcome of validOutcomes) {
+        await asana.createTask(createdResources.asanaProjectGid, {
+          name: outcome.name,
+          description: outcome.description || '',
+          dueDate: outcome.dueDate,
+        });
+      }
+
+      updateCreatedResources({ asanaMilestonesCreated: true });
+    } catch (err) {
+      setSubmitError(`Asana Milestones: ${err.message}`);
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  // 3. Create Google Scoping Doc
+  const handleCreateScopingDoc = async () => {
+    const data = getFormData();
+    setLoadingAction('scopingDoc');
+    setSubmitError(null);
+
+    try {
+      const sharedDriveId = import.meta.env.VITE_GOOGLE_SHARED_DRIVE_ID;
+      const parentFolderId = import.meta.env.VITE_GOOGLE_PROJECTS_FOLDER_ID;
+      const scopingDocTemplateId = import.meta.env.VITE_GOOGLE_SCOPING_DOC_TEMPLATE_ID;
+
+      if (!parentFolderId) {
+        throw new Error('Google projects folder not configured');
+      }
+      if (!scopingDocTemplateId) {
+        throw new Error('Scoping doc template not configured');
+      }
+
+      // Search for existing folder or create new one
+      const folderName = data.projectAcronym || data.projectName;
+      let folders = await google.searchDriveFolder(folderName, sharedDriveId, parentFolderId);
+
+      let folderId;
+      if (folders.length > 0) {
+        folderId = folders[0].id;
+      } else {
+        const newFolder = await google.createDriveFolder(folderName, sharedDriveId, parentFolderId);
+        folderId = newFolder.id;
+      }
+      const folderUrl = google.getFolderUrl(folderId);
+
+      // Create scoping document from template
+      const docName = `${data.projectName} - Scoping Document`;
+      const doc = await google.copyTemplate(scopingDocTemplateId, folderId, docName);
+
+      // Populate placeholders
+      const replacements = google.buildReplacements(data);
+      await google.populateDoc(doc.id, replacements);
+
+      const scopingDocUrl = google.getDocUrl(doc.id);
+      updateCreatedResources({ googleFolderId: folderId, folderUrl, scopingDocId: doc.id, scopingDocUrl });
+    } catch (err) {
+      setSubmitError(`Scoping Doc: ${err.message}`);
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  // 4. Create Google Kickoff Deck
+  const handleCreateKickoffDeck = async () => {
+    const data = getFormData();
+    setLoadingAction('kickoffDeck');
+    setSubmitError(null);
+
+    try {
+      const kickoffDeckTemplateId = import.meta.env.VITE_GOOGLE_KICKOFF_DECK_TEMPLATE_ID;
+
+      if (!kickoffDeckTemplateId) {
+        throw new Error('Kickoff deck template not configured');
+      }
+
+      // Need folder first
+      let folderId = createdResources.googleFolderId;
+      if (!folderId) {
+        // Create folder if not exists
+        const sharedDriveId = import.meta.env.VITE_GOOGLE_SHARED_DRIVE_ID;
+        const parentFolderId = import.meta.env.VITE_GOOGLE_PROJECTS_FOLDER_ID;
+        const folderName = data.projectAcronym || data.projectName;
+
+        let folders = await google.searchDriveFolder(folderName, sharedDriveId, parentFolderId);
+        if (folders.length > 0) {
+          folderId = folders[0].id;
+        } else {
+          const newFolder = await google.createDriveFolder(folderName, sharedDriveId, parentFolderId);
+          folderId = newFolder.id;
+        }
+        updateCreatedResources({ googleFolderId: folderId, folderUrl: google.getFolderUrl(folderId) });
+      }
+
+      // Create kickoff deck from template
+      const deckName = `${data.projectName} - Kickoff Deck`;
+      const deck = await google.copyTemplate(kickoffDeckTemplateId, folderId, deckName);
+
+      // Populate placeholders
+      const replacements = google.buildReplacements(data);
+      await google.populateSlides(deck.id, replacements);
+
+      const kickoffDeckUrl = google.getSlidesUrl(deck.id);
+      updateCreatedResources({ kickoffDeckId: deck.id, kickoffDeckUrl });
+    } catch (err) {
+      setSubmitError(`Kickoff Deck: ${err.message}`);
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  // 5. Create Airtable Records (project, milestones, assignments) and populate URLs
+  const handleCreateAirtableRecords = async () => {
+    const data = getFormData();
+    setLoadingAction('airtable');
+    setSubmitError(null);
+
+    try {
+      // Create project record
       const projectRecord = await airtable.createProject({
         name: data.projectName,
         acronym: data.projectAcronym,
@@ -194,15 +464,14 @@ export default function ProjectForm() {
         endDate: data.endDate,
       });
       const projectId = projectRecord.id;
-      results.airtableUrl = `https://airtable.com/${import.meta.env.VITE_AIRTABLE_BASE_ID}/${projectId}`;
 
-      // 2. Create milestone records
+      // Create milestone records
       const validOutcomes = data.outcomes.filter(o => o.name?.trim());
       if (validOutcomes.length > 0) {
         await airtable.createMilestones(projectId, validOutcomes);
       }
 
-      // 3. Create role assignments (now with FTE)
+      // Create role assignments (with FTE)
       const roleAssignments = {};
       for (const [roleKey, roleData] of Object.entries(data.roles)) {
         if (roleData?.memberId) {
@@ -216,111 +485,43 @@ export default function ProjectForm() {
         await airtable.createAssignments(projectId, roleAssignments);
       }
 
-      // 4. Create Asana project (if connected)
-      if (connectionStatus.asana) {
-        try {
-          const asanaTemplateGid = import.meta.env.VITE_ASANA_TEMPLATE_GID;
-          const asanaTeamGid = import.meta.env.VITE_ASANA_TEAM_GID;
-
-          if (asanaTemplateGid && asanaTeamGid) {
-            // Get coordinator name for Asana user matching
-            const coordinatorId = data.roles.project_coordinator?.memberId;
-            const coordinatorMember = teamMembers.find(m => m.id === coordinatorId);
-
-            // Get Asana users for matching
-            const user = await asana.getCurrentUser();
-            const workspaceGid = user.workspaces?.[0]?.gid;
-            let asanaUsers = [];
-            if (workspaceGid) {
-              asanaUsers = await asana.getWorkspaceUsers(workspaceGid);
-            }
-
-            // Build role assignments for Asana
-            const asanaRoleAssignments = [];
-            if (coordinatorMember) {
-              const match = asana.findBestUserMatch(coordinatorMember.name, asanaUsers);
-              if (match?.user?.gid) {
-                asanaRoleAssignments.push({ roleName: 'coordinator', userGid: match.user.gid });
-              }
-            }
-
-            const ownerId = data.roles.project_owner?.memberId;
-            const ownerMember = teamMembers.find(m => m.id === ownerId);
-            if (ownerMember) {
-              const match = asana.findBestUserMatch(ownerMember.name, asanaUsers);
-              if (match?.user?.gid) {
-                asanaRoleAssignments.push({ roleName: 'owner', userGid: match.user.gid });
-              }
-            }
-
-            const asanaProjectGid = await asana.createProjectFromTemplate(
-              asanaTemplateGid,
-              data.projectName,
-              asanaTeamGid,
-              data.startDate,
-              asanaRoleAssignments
-            );
-
-            results.asanaUrl = asana.getProjectUrl(asanaProjectGid);
-
-            // Update Airtable with Asana URL
-            await airtable.updateRecord('Projects', projectId, {
-              'Asana Board': results.asanaUrl,
-            });
-          }
-        } catch (asanaErr) {
-          console.warn('Asana project creation failed:', asanaErr);
-          // Continue - Asana is optional
-        }
+      // Update project with URLs from other resources
+      const urlUpdates = {};
+      if (createdResources.asanaUrl) {
+        urlUpdates['Asana Board'] = createdResources.asanaUrl;
+      }
+      if (createdResources.scopingDocUrl) {
+        urlUpdates['Scoping Doc'] = createdResources.scopingDocUrl;
+      }
+      if (createdResources.folderUrl) {
+        urlUpdates['Project Folder'] = createdResources.folderUrl;
       }
 
-      // 5. Create Google Drive folder and documents (if connected)
-      if (connectionStatus.google) {
-        try {
-          const sharedDriveId = import.meta.env.VITE_GOOGLE_SHARED_DRIVE_ID;
-          const parentFolderId = import.meta.env.VITE_GOOGLE_PROJECTS_FOLDER_ID;
-          const scopingDocTemplateId = import.meta.env.VITE_GOOGLE_SCOPING_DOC_TEMPLATE_ID;
-
-          if (parentFolderId) {
-            // Search for existing folder or create new one
-            const folderName = data.projectAcronym || data.projectName;
-            let folders = await google.searchDriveFolder(folderName, sharedDriveId, parentFolderId);
-
-            let folderId;
-            if (folders.length > 0) {
-              folderId = folders[0].id;
-            } else {
-              const newFolder = await google.createDriveFolder(folderName, sharedDriveId, parentFolderId);
-              folderId = newFolder.id;
-            }
-            results.driveUrl = google.getFolderUrl(folderId);
-
-            // Create scoping document from template
-            if (scopingDocTemplateId) {
-              const docName = `${data.projectName} - Scoping Document`;
-              const doc = await google.copyTemplate(scopingDocTemplateId, folderId, docName);
-
-              // Populate placeholders
-              const replacements = google.buildReplacements(data);
-              await google.populateDoc(doc.id, replacements);
-            }
-          }
-        } catch (googleErr) {
-          console.warn('Google Drive setup failed:', googleErr);
-          // Continue - Google is optional
-        }
+      if (Object.keys(urlUpdates).length > 0) {
+        await airtable.updateRecord('Projects', projectId, urlUpdates);
       }
 
-      // Clear draft on successful submission
-      localStorage.removeItem(DRAFT_KEY);
-
-      // Navigate to success page
-      navigate('/success', { state: results });
+      const airtableUrl = `https://airtable.com/${import.meta.env.VITE_AIRTABLE_BASE_ID}/${projectId}`;
+      updateCreatedResources({ airtableProjectId: projectId, airtableUrl });
     } catch (err) {
-      setSubmitError(err.message);
+      setSubmitError(`Airtable: ${err.message}`);
     } finally {
-      setIsSubmitting(false);
+      setLoadingAction(null);
     }
+  };
+
+  // Navigate to success page
+  const handleFinish = () => {
+    localStorage.removeItem(DRAFT_KEY);
+    navigate('/success', {
+      state: {
+        projectName: watchedValues.projectName,
+        airtableUrl: createdResources.airtableUrl,
+        asanaUrl: createdResources.asanaUrl,
+        driveUrl: createdResources.folderUrl,
+        deckUrl: createdResources.kickoffDeckUrl,
+      },
+    });
   };
 
   const sections = [
@@ -328,6 +529,7 @@ export default function ProjectForm() {
     { id: 'description', label: 'Description' },
     { id: 'team', label: 'Team' },
     { id: 'outcomes', label: 'Outcomes' },
+    { id: 'actions', label: 'Actions' },
   ];
 
   return (
@@ -359,7 +561,7 @@ export default function ProjectForm() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit(onSubmit)}>
+        <form onSubmit={(e) => e.preventDefault()}>
           {/* Basics Section */}
           <FormSection id="basics" title="Project Basics" helpFile="project-name.md">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -571,33 +773,101 @@ export default function ProjectForm() {
             </div>
           </FormSection>
 
-          {/* Submit */}
-          <div className="mt-8 pt-6 border-t border-gray-200">
+          {/* Actions Section */}
+          <FormSection id="actions" title="Create Resources">
             {submitError && (
               <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
                 {submitError}
               </div>
             )}
 
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-gray-500">
-                {isDirty && (
-                  <span className="flex items-center space-x-1">
-                    <CheckCircleIcon className="w-4 h-4 text-green-500" />
-                    <span>Draft saved</span>
-                  </span>
+            <p className="text-sm text-gray-600 mb-4">
+              Create resources step by step. You can create them in any order, but Asana Milestones requires the Asana Board first, and Airtable will include URLs from other resources if created first.
+            </p>
+
+            <div className="space-y-3">
+              {/* Asana Board */}
+              <ActionButton
+                label="Create Asana Board"
+                onClick={handleCreateAsanaBoard}
+                isLoading={loadingAction === 'asanaBoard'}
+                isComplete={!!createdResources.asanaProjectGid}
+                url={createdResources.asanaUrl}
+                disabled={!connectionStatus.asana}
+              />
+
+              {/* Asana Milestones */}
+              <ActionButton
+                label="Create Asana Milestone Tickets"
+                onClick={handleCreateAsanaMilestones}
+                isLoading={loadingAction === 'asanaMilestones'}
+                isComplete={createdResources.asanaMilestonesCreated}
+                disabled={!connectionStatus.asana || !createdResources.asanaProjectGid}
+              />
+
+              {/* Scoping Doc */}
+              <ActionButton
+                label="Create Google Scoping Doc"
+                onClick={handleCreateScopingDoc}
+                isLoading={loadingAction === 'scopingDoc'}
+                isComplete={!!createdResources.scopingDocId}
+                url={createdResources.scopingDocUrl}
+                disabled={!connectionStatus.google}
+              />
+
+              {/* Kickoff Deck */}
+              <ActionButton
+                label="Create Google Kickoff Deck"
+                onClick={handleCreateKickoffDeck}
+                isLoading={loadingAction === 'kickoffDeck'}
+                isComplete={!!createdResources.kickoffDeckId}
+                url={createdResources.kickoffDeckUrl}
+                disabled={!connectionStatus.google}
+              />
+
+              {/* Airtable Records */}
+              <ActionButton
+                label="Create Airtable Records"
+                onClick={handleCreateAirtableRecords}
+                isLoading={loadingAction === 'airtable'}
+                isComplete={!!createdResources.airtableProjectId}
+                url={createdResources.airtableUrl}
+                disabled={!connectionStatus.airtable}
+              />
+            </div>
+
+            {/* Status and navigation */}
+            <div className="mt-6 pt-4 border-t border-gray-200 flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <p className="text-sm text-gray-500">
+                  {isDirty && (
+                    <span className="flex items-center space-x-1">
+                      <CheckCircleIcon className="w-4 h-4 text-green-500" />
+                      <span>Draft saved</span>
+                    </span>
+                  )}
+                </p>
+                {Object.keys(createdResources).length > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearCreatedResources}
+                    className="text-sm text-red-600 hover:text-red-800"
+                  >
+                    Clear progress
+                  </button>
                 )}
-              </p>
+              </div>
 
               <button
-                type="submit"
-                disabled={isSubmitting || !isConnected}
+                type="button"
+                onClick={handleFinish}
+                disabled={!createdResources.airtableProjectId}
                 className="btn-primary px-8"
               >
-                {isSubmitting ? 'Creating Project...' : 'Create Project'}
+                Finish & View Summary
               </button>
             </div>
-          </div>
+          </FormSection>
         </form>
       </main>
     </div>
