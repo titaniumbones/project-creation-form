@@ -32,6 +32,16 @@ const ASANA_ACCESS_TOKEN_KEY = 'asanaAccessToken';
 const ASANA_REFRESH_TOKEN_KEY = 'asanaRefreshToken';
 const ASANA_TOKEN_EXPIRY_KEY = 'asanaTokenExpiry';
 
+// Google OAuth keys
+const GOOGLE_ACCESS_TOKEN_KEY = 'googleAccessToken';
+const GOOGLE_REFRESH_TOKEN_KEY = 'googleRefreshToken';
+const GOOGLE_TOKEN_EXPIRY_KEY = 'googleTokenExpiry';
+// Google Drive configuration keys
+const GOOGLE_SHARED_DRIVE_ID_KEY = 'googleSharedDriveId';
+const GOOGLE_PARENT_FOLDER_ID_KEY = 'googleParentFolderId';
+const GOOGLE_SCOPING_TEMPLATE_ID_KEY = 'googleScopingTemplateId';
+const GOOGLE_KICKOFF_DECK_TEMPLATE_ID_KEY = 'googleKickoffDeckTemplateId';
+
 // Parse Asana project GID from board URL
 // Supports: /0/PROJECT_GID/... and /1/WORKSPACE/project/PROJECT_GID/...
 function parseAsanaProjectGid(url) {
@@ -329,6 +339,233 @@ async function addProjectMembers(pat, projectGid, memberGids) {
     return true;
 }
 
+// =====================
+// Google Drive API Functions
+// =====================
+
+// Get valid Google access token - refreshes if needed
+async function getValidGoogleAccessToken(globalConfig) {
+    const storedRefreshToken = globalConfig.get(GOOGLE_REFRESH_TOKEN_KEY);
+    const storedAccessToken = globalConfig.get(GOOGLE_ACCESS_TOKEN_KEY);
+    const storedTokenExpiry = globalConfig.get(GOOGLE_TOKEN_EXPIRY_KEY);
+
+    // If no OAuth tokens, return null
+    if (!storedRefreshToken) {
+        return null;
+    }
+
+    // Check if token is still valid (with 1 minute buffer)
+    if (storedTokenExpiry && Date.now() < storedTokenExpiry - 60000) {
+        return storedAccessToken;
+    }
+
+    // Need to refresh the token
+    if (!OAUTH_RELAY_URL) {
+        console.warn('[Google OAuth] No OAUTH_RELAY_URL configured');
+        return null;
+    }
+
+    try {
+        const response = await fetch(`${OAUTH_RELAY_URL}/.netlify/functions/google-refresh`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: storedRefreshToken }),
+        });
+
+        const tokens = await response.json();
+        if (tokens.error) {
+            console.error('[Google OAuth] Token refresh failed:', tokens.error);
+            // Clear invalid OAuth tokens
+            await globalConfig.setAsync(GOOGLE_ACCESS_TOKEN_KEY, undefined);
+            await globalConfig.setAsync(GOOGLE_REFRESH_TOKEN_KEY, undefined);
+            await globalConfig.setAsync(GOOGLE_TOKEN_EXPIRY_KEY, undefined);
+            return null;
+        }
+
+        // Save new tokens
+        await globalConfig.setAsync(GOOGLE_ACCESS_TOKEN_KEY, tokens.access_token);
+        await globalConfig.setAsync(GOOGLE_TOKEN_EXPIRY_KEY, Date.now() + tokens.expires_in * 1000);
+        if (tokens.refresh_token) {
+            await globalConfig.setAsync(GOOGLE_REFRESH_TOKEN_KEY, tokens.refresh_token);
+        }
+
+        return tokens.access_token;
+    } catch (err) {
+        console.error('[Google OAuth] Token refresh error:', err);
+        return null;
+    }
+}
+
+// Search for a folder in Google Drive by name
+async function searchGoogleDriveFolder(accessToken, folderName, sharedDriveId, parentFolderId = null) {
+    let query = `name='${folderName.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+
+    if (parentFolderId) {
+        query += ` and '${parentFolderId}' in parents`;
+    }
+
+    const params = new URLSearchParams({
+        q: query,
+        supportsAllDrives: 'true',
+        includeItemsFromAllDrives: 'true',
+        fields: 'files(id,name,webViewLink)',
+    });
+
+    if (sharedDriveId) {
+        params.set('corpora', 'drive');
+        params.set('driveId', sharedDriveId);
+    }
+
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || 'Failed to search Google Drive');
+    }
+
+    const data = await response.json();
+    return data.files || [];
+}
+
+// Create a folder in Google Drive
+async function createGoogleDriveFolder(accessToken, folderName, sharedDriveId, parentFolderId = null) {
+    const metadata = {
+        name: folderName,
+        mimeType: 'application/vnd.google-apps.folder',
+    };
+
+    if (parentFolderId) {
+        metadata.parents = [parentFolderId];
+    } else if (sharedDriveId) {
+        metadata.parents = [sharedDriveId];
+    }
+
+    const response = await fetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(metadata),
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || 'Failed to create folder');
+    }
+
+    const data = await response.json();
+    return data; // { id, name, ... }
+}
+
+// Copy a Google Doc template
+async function copyGoogleDocTemplate(accessToken, templateId, destinationFolderId, newName) {
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files/${templateId}/copy?supportsAllDrives=true`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            name: newName,
+            parents: [destinationFolderId],
+        }),
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || 'Failed to copy template');
+    }
+
+    const data = await response.json();
+    return data; // { id, name, webViewLink, ... }
+}
+
+// Populate a Google Doc with placeholder replacements
+async function populateGoogleDoc(accessToken, documentId, replacements) {
+    // Build batch update requests for text replacements
+    const requests = Object.entries(replacements).map(([placeholder, value]) => ({
+        replaceAllText: {
+            containsText: {
+                text: placeholder,
+                matchCase: true,
+            },
+            replaceText: value || '',
+        },
+    }));
+
+    if (requests.length === 0) return;
+
+    const response = await fetch(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ requests }),
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || 'Failed to populate document');
+    }
+
+    return await response.json();
+}
+
+// Get Google Doc URL from document ID
+function getGoogleDocUrl(documentId) {
+    return `https://docs.google.com/document/d/${documentId}/edit`;
+}
+
+// Get Google Drive folder URL
+function getGoogleDriveFolderUrl(folderId) {
+    return `https://drive.google.com/drive/folders/${folderId}`;
+}
+
+// Populate a Google Slides presentation with placeholder replacements
+async function populateGoogleSlides(accessToken, presentationId, replacements) {
+    // Build batch update requests for text replacements
+    const requests = Object.entries(replacements).map(([placeholder, value]) => ({
+        replaceAllText: {
+            containsText: {
+                text: placeholder,
+                matchCase: true,
+            },
+            replaceText: value || '',
+        },
+    }));
+
+    if (requests.length === 0) return;
+
+    const response = await fetch(`https://slides.googleapis.com/v1/presentations/${presentationId}:batchUpdate`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ requests }),
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || 'Failed to populate presentation');
+    }
+
+    return await response.json();
+}
+
+// Get Google Slides URL from presentation ID
+function getGoogleSlidesUrl(presentationId) {
+    return `https://docs.google.com/presentation/d/${presentationId}/edit`;
+}
+
+// =====================
+// Asana API Functions
+// =====================
+
 // Get valid access token - refreshes if needed, falls back to PAT
 async function getValidAccessToken(globalConfig) {
     const storedPat = globalConfig.get(ASANA_PAT_KEY);
@@ -422,8 +659,38 @@ function ScopeOfWorkGenerator() {
     const hasAsanaConfig = hasOAuthConfig; // OAuth only now
     const hasFullAsanaConfig = hasAsanaConfig && !!storedTeamGid;
 
-    // OAuth state
+    // Google OAuth tokens and config
+    const storedGoogleAccessToken = globalConfig.get(GOOGLE_ACCESS_TOKEN_KEY);
+    const storedGoogleRefreshToken = globalConfig.get(GOOGLE_REFRESH_TOKEN_KEY);
+    const storedGoogleTokenExpiry = globalConfig.get(GOOGLE_TOKEN_EXPIRY_KEY);
+    const storedSharedDriveId = globalConfig.get(GOOGLE_SHARED_DRIVE_ID_KEY);
+    const storedParentFolderId = globalConfig.get(GOOGLE_PARENT_FOLDER_ID_KEY);
+    const storedScopingTemplateId = globalConfig.get(GOOGLE_SCOPING_TEMPLATE_ID_KEY);
+    const storedKickoffDeckTemplateId = globalConfig.get(GOOGLE_KICKOFF_DECK_TEMPLATE_ID_KEY);
+    const hasGoogleOAuth = !!storedGoogleRefreshToken;
+    const hasFullGoogleConfig = hasGoogleOAuth && !!storedScopingTemplateId;
+    const hasKickoffDeckConfig = hasGoogleOAuth && !!storedKickoffDeckTemplateId;
+
+    // Asana OAuth state
     const [isConnectingOAuth, setIsConnectingOAuth] = useState(false);
+
+    // Google Drive state
+    const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
+    const [googleStatus, setGoogleStatus] = useState(null);
+    const [isGeneratingDriveDoc, setIsGeneratingDriveDoc] = useState(false);
+    const [driveDocResult, setDriveDocResult] = useState(null);
+    const [showCreateFolderPrompt, setShowCreateFolderPrompt] = useState(false);
+    const [pendingFolderName, setPendingFolderName] = useState(null);
+
+    // Google Drive settings inputs
+    const [sharedDriveIdInput, setSharedDriveIdInput] = useState('');
+    const [parentFolderIdInput, setParentFolderIdInput] = useState('');
+    const [templateIdInput, setTemplateIdInput] = useState('');
+    const [kickoffDeckTemplateIdInput, setKickoffDeckTemplateIdInput] = useState('');
+
+    // Kick off deck generation state
+    const [isGeneratingDeck, setIsGeneratingDeck] = useState(false);
+    const [deckResult, setDeckResult] = useState(null);
 
     // Get the Projects table
     const projectsTable = base.getTableByNameIfExists('Projects');
@@ -940,6 +1207,330 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
         setPatStatus({ type: 'success', message: 'OAuth disconnected' });
     }
 
+    // Google OAuth login handler
+    function handleGoogleOAuthLogin() {
+        if (!OAUTH_RELAY_URL) {
+            setGoogleStatus({ type: 'error', message: 'OAuth relay URL not configured.' });
+            return;
+        }
+
+        setIsConnectingGoogle(true);
+        setGoogleStatus(null);
+
+        const popup = window.open(
+            `${OAUTH_RELAY_URL}/.netlify/functions/google-auth`,
+            'google-auth',
+            'width=600,height=700'
+        );
+
+        const messageHandler = async (event) => {
+            // Ignore messages from other origins or without our type
+            if (event.origin !== OAUTH_RELAY_URL) return;
+            if (event.data?.type !== 'google-oauth-callback') return;
+
+            window.removeEventListener('message', messageHandler);
+            setIsConnectingGoogle(false);
+
+            if (event.data.error) {
+                setGoogleStatus({ type: 'error', message: `OAuth failed: ${event.data.error}` });
+                return;
+            }
+
+            const { access_token, refresh_token, expires_in } = event.data;
+
+            try {
+                // Save OAuth tokens
+                await globalConfig.setAsync(GOOGLE_ACCESS_TOKEN_KEY, access_token);
+                await globalConfig.setAsync(GOOGLE_REFRESH_TOKEN_KEY, refresh_token);
+                await globalConfig.setAsync(GOOGLE_TOKEN_EXPIRY_KEY, Date.now() + expires_in * 1000);
+
+                setGoogleStatus({ type: 'success', message: 'Connected to Google Drive' });
+            } catch (err) {
+                setGoogleStatus({ type: 'error', message: `OAuth error: ${err.message}` });
+            }
+        };
+
+        window.addEventListener('message', messageHandler);
+
+        // Handle popup closed without completing auth
+        const checkClosed = setInterval(() => {
+            if (popup?.closed) {
+                clearInterval(checkClosed);
+                window.removeEventListener('message', messageHandler);
+                setIsConnectingGoogle(false);
+            }
+        }, 500);
+    }
+
+    // Google OAuth disconnect handler
+    async function handleDisconnectGoogle() {
+        await globalConfig.setAsync(GOOGLE_ACCESS_TOKEN_KEY, undefined);
+        await globalConfig.setAsync(GOOGLE_REFRESH_TOKEN_KEY, undefined);
+        await globalConfig.setAsync(GOOGLE_TOKEN_EXPIRY_KEY, undefined);
+        setGoogleStatus({ type: 'success', message: 'Google Drive disconnected' });
+        setDriveDocResult(null);
+    }
+
+    // Generate scoping document in Google Drive
+    async function handleGenerateDriveDocument() {
+        if (!selectedRecordId || !hasFullGoogleConfig) return;
+
+        setIsGeneratingDriveDoc(true);
+        setError(null);
+        setDriveDocResult(null);
+        setShowCreateFolderPrompt(false);
+
+        try {
+            const record = records.find((r) => r.id === selectedRecordId);
+            if (!record) throw new Error('Record not found');
+
+            const projectName = record.getCellValueAsString('Project') || 'Untitled Project';
+            const projectAcronym = record.getCellValueAsString('Project Acronym') || '';
+            const displayTitle = projectAcronym ? `${projectName} (${projectAcronym})` : projectName;
+
+            setStatus(`Searching for project folder "${projectName}"...`);
+
+            // Get valid Google access token
+            const accessToken = await getValidGoogleAccessToken(globalConfig);
+            if (!accessToken) {
+                throw new Error('Google authentication expired. Please reconnect.');
+            }
+
+            // Search for existing project folder
+            const folders = await searchGoogleDriveFolder(
+                accessToken,
+                projectName,
+                storedSharedDriveId,
+                storedParentFolderId
+            );
+
+            let projectFolderId;
+            let projectFolderUrl;
+
+            if (folders.length > 0) {
+                // Use existing folder
+                projectFolderId = folders[0].id;
+                projectFolderUrl = getGoogleDriveFolderUrl(projectFolderId);
+                setStatus(`Found existing folder: "${projectName}"`);
+            } else {
+                // Prompt user to create folder
+                setPendingFolderName(projectName);
+                setShowCreateFolderPrompt(true);
+                setIsGeneratingDriveDoc(false);
+                return;
+            }
+
+            // Continue with document creation
+            await createDocumentInFolder(record, projectFolderId, projectFolderUrl, displayTitle, accessToken);
+        } catch (err) {
+            setError(`Google Drive error: ${err.message}`);
+            setIsGeneratingDriveDoc(false);
+        }
+    }
+
+    // Create folder and continue with document generation
+    async function handleCreateFolderAndContinue() {
+        if (!pendingFolderName || !selectedRecordId) return;
+
+        setShowCreateFolderPrompt(false);
+        setIsGeneratingDriveDoc(true);
+
+        try {
+            const record = records.find((r) => r.id === selectedRecordId);
+            if (!record) throw new Error('Record not found');
+
+            const projectAcronym = record.getCellValueAsString('Project Acronym') || '';
+            const displayTitle = projectAcronym ? `${pendingFolderName} (${projectAcronym})` : pendingFolderName;
+
+            setStatus(`Creating folder "${pendingFolderName}"...`);
+
+            const accessToken = await getValidGoogleAccessToken(globalConfig);
+            if (!accessToken) {
+                throw new Error('Google authentication expired. Please reconnect.');
+            }
+
+            // Create the folder
+            const folder = await createGoogleDriveFolder(
+                accessToken,
+                pendingFolderName,
+                storedSharedDriveId,
+                storedParentFolderId
+            );
+
+            const projectFolderId = folder.id;
+            const projectFolderUrl = getGoogleDriveFolderUrl(projectFolderId);
+            setStatus(`Created folder: "${pendingFolderName}"`);
+
+            // Continue with document creation
+            await createDocumentInFolder(record, projectFolderId, projectFolderUrl, displayTitle, accessToken);
+        } catch (err) {
+            setError(`Failed to create folder: ${err.message}`);
+            setIsGeneratingDriveDoc(false);
+        } finally {
+            setPendingFolderName(null);
+        }
+    }
+
+    // Helper function to create document in folder
+    async function createDocumentInFolder(record, folderId, folderUrl, displayTitle, accessToken) {
+        try {
+            setStatus('Copying template document...');
+
+            // Copy the template
+            const docName = `${displayTitle} - Scoping Document`;
+            const newDoc = await copyGoogleDocTemplate(
+                accessToken,
+                storedScopingTemplateId,
+                folderId,
+                docName
+            );
+
+            setStatus('Populating document with project data...');
+
+            // Build replacements from record fields
+            const formattedDate = new Date().toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+            });
+
+            const replacements = {
+                '{{PROJECT_NAME}}': record.getCellValueAsString('Project') || '',
+                '{{PROJECT_ACRONYM}}': record.getCellValueAsString('Project Acronym') || '',
+                '{{PROJECT_TITLE}}': displayTitle,
+                '{{STATUS}}': record.getCellValueAsString('Status') || 'In Ideation',
+                '{{START_DATE}}': formatDate(record.getCellValue('Start Date')),
+                '{{END_DATE}}': formatDate(record.getCellValue('End Date')),
+                '{{PROJECT_DESCRIPTION}}': record.getCellValueAsString('Project Description') || '',
+                '{{ROLES_SUMMARY}}': record.getCellValueAsString('Roles Summary') || '',
+                '{{MILESTONE_ROLLUP}}': record.getCellValueAsString('Milestone Rollup (from Milestones)') || '',
+                '{{GENERATED_DATE}}': formattedDate,
+            };
+
+            // Populate the document
+            await populateGoogleDoc(accessToken, newDoc.id, replacements);
+
+            const docUrl = getGoogleDocUrl(newDoc.id);
+
+            setDriveDocResult({
+                docId: newDoc.id,
+                docUrl: docUrl,
+                docName: docName,
+                folderId: folderId,
+                folderUrl: folderUrl,
+            });
+
+            setStatus(`Document created: "${docName}"`);
+            setIsGeneratingDriveDoc(false);
+        } catch (err) {
+            throw err;
+        }
+    }
+
+    // Generate Kick Off Deck in Google Drive
+    async function handleGenerateKickoffDeck() {
+        if (!selectedRecordId || !hasKickoffDeckConfig) return;
+
+        setIsGeneratingDeck(true);
+        setError(null);
+        setDeckResult(null);
+
+        try {
+            const record = records.find((r) => r.id === selectedRecordId);
+            if (!record) throw new Error('Record not found');
+
+            const projectName = record.getCellValueAsString('Project') || 'Untitled Project';
+            const projectAcronym = record.getCellValueAsString('Project Acronym') || '';
+            const displayTitle = projectAcronym ? `${projectName} (${projectAcronym})` : projectName;
+
+            // Get valid Google access token
+            const accessToken = await getValidGoogleAccessToken(globalConfig);
+            if (!accessToken) {
+                throw new Error('Google authentication expired. Please reconnect.');
+            }
+
+            // Search for existing project folder (same as doc generation)
+            setStatus(`Searching for project folder "${projectName}"...`);
+            const folders = await searchGoogleDriveFolder(
+                accessToken,
+                projectName,
+                storedSharedDriveId,
+                storedParentFolderId
+            );
+
+            let projectFolderId;
+            let projectFolderUrl;
+
+            if (folders.length > 0) {
+                projectFolderId = folders[0].id;
+                projectFolderUrl = getGoogleDriveFolderUrl(projectFolderId);
+            } else {
+                // Create folder automatically for deck (or prompt - using auto-create for simplicity)
+                setStatus(`Creating folder "${projectName}"...`);
+                const folder = await createGoogleDriveFolder(
+                    accessToken,
+                    projectName,
+                    storedSharedDriveId,
+                    storedParentFolderId
+                );
+                projectFolderId = folder.id;
+                projectFolderUrl = getGoogleDriveFolderUrl(projectFolderId);
+            }
+
+            setStatus('Copying kick off deck template...');
+
+            // Copy the template (using Drive API - same as doc)
+            const deckName = `${displayTitle} - Kick Off Deck`;
+            const newDeck = await copyGoogleDocTemplate(
+                accessToken,
+                storedKickoffDeckTemplateId,
+                projectFolderId,
+                deckName
+            );
+
+            setStatus('Populating deck with project data...');
+
+            // Build replacements from record fields
+            const formattedDate = new Date().toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+            });
+
+            const replacements = {
+                '{{PROJECT_NAME}}': record.getCellValueAsString('Project') || '',
+                '{{PROJECT_ACRONYM}}': record.getCellValueAsString('Project Acronym') || '',
+                '{{PROJECT_TITLE}}': displayTitle,
+                '{{STATUS}}': record.getCellValueAsString('Status') || 'In Ideation',
+                '{{START_DATE}}': formatDate(record.getCellValue('Start Date')),
+                '{{END_DATE}}': formatDate(record.getCellValue('End Date')),
+                '{{PROJECT_DESCRIPTION}}': record.getCellValueAsString('Project Description') || '',
+                '{{ROLES_SUMMARY}}': record.getCellValueAsString('Roles Summary') || '',
+                '{{MILESTONE_ROLLUP}}': record.getCellValueAsString('Milestone Rollup (from Milestones)') || '',
+                '{{GENERATED_DATE}}': formattedDate,
+            };
+
+            // Populate the presentation
+            await populateGoogleSlides(accessToken, newDeck.id, replacements);
+
+            const deckUrl = getGoogleSlidesUrl(newDeck.id);
+
+            setDeckResult({
+                deckId: newDeck.id,
+                deckUrl: deckUrl,
+                deckName: deckName,
+                folderId: projectFolderId,
+                folderUrl: projectFolderUrl,
+            });
+
+            setStatus(`Kick Off Deck created: "${deckName}"`);
+        } catch (err) {
+            setError(`Kick Off Deck error: ${err.message}`);
+        } finally {
+            setIsGeneratingDeck(false);
+        }
+    }
+
     // Track member addition status
     const [memberAddStatus, setMemberAddStatus] = useState(null);
     // { attempted: boolean, succeeded: string[], failed: string[], projectGid: string }
@@ -1177,16 +1768,16 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
             {/* Settings Section */}
             <Box marginBottom={3}>
                 <Button
-                    onClick={() => setShowSettings(!showSettings)}
-                    icon={showSettings ? 'chevronUp' : 'cog'}
+                    onClick={() => setShowSettings(showSettings === 'asana' ? false : 'asana')}
+                    icon={showSettings === 'asana' ? 'chevronUp' : 'cog'}
                     variant="secondary"
                     size="small"
                 >
-                    {showSettings ? 'Hide Settings' : 'Asana Settings'}
-                    {hasAsanaConfig && !showSettings && ' ✓'}
+                    {showSettings === 'asana' ? 'Hide Settings' : 'Asana Settings'}
+                    {hasAsanaConfig && showSettings !== 'asana' && ' ✓'}
                 </Button>
 
-                {showSettings && (
+                {showSettings === 'asana' && (
                     <Box
                         marginTop={2}
                         padding={3}
@@ -1314,6 +1905,309 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                 )}
             </Box>
 
+            {/* Google Drive Settings Section */}
+            <Box marginBottom={3}>
+                <Button
+                    onClick={() => setShowSettings(showSettings === 'google' ? false : 'google')}
+                    icon={showSettings === 'google' ? 'chevronUp' : 'cog'}
+                    variant="secondary"
+                    size="small"
+                >
+                    {showSettings === 'google' ? 'Hide Settings' : 'Google Drive Settings'}
+                    {hasGoogleOAuth && showSettings !== 'google' && ' ✓'}
+                </Button>
+
+                {showSettings === 'google' && (
+                    <Box
+                        marginTop={2}
+                        padding={3}
+                        backgroundColor={colors.GRAY_LIGHT_2}
+                        borderRadius={3}
+                    >
+                        <Heading size="xsmall" marginBottom={2}>
+                            Google Drive Configuration
+                        </Heading>
+
+                        {/* Google OAuth Connection */}
+                        {hasGoogleOAuth ? (
+                            <Box marginBottom={3}>
+                                <Text marginBottom={2} textColor="green">
+                                    ✓ Connected to Google Drive
+                                </Text>
+                                <Button
+                                    onClick={handleDisconnectGoogle}
+                                    icon="x"
+                                    variant="danger"
+                                    size="small"
+                                >
+                                    Disconnect
+                                </Button>
+                            </Box>
+                        ) : OAUTH_RELAY_URL ? (
+                            <Box marginBottom={3}>
+                                <Text size="small" marginBottom={2}>
+                                    Connect to Google Drive to generate documents:
+                                </Text>
+                                <Button
+                                    onClick={handleGoogleOAuthLogin}
+                                    disabled={isConnectingGoogle}
+                                    icon={isConnectingGoogle ? undefined : 'user'}
+                                    variant="primary"
+                                    size="small"
+                                >
+                                    {isConnectingGoogle ? 'Connecting...' : 'Connect to Google'}
+                                </Button>
+                            </Box>
+                        ) : (
+                            <Box marginBottom={3}>
+                                <Text size="small" textColor="orange">
+                                    OAuth relay not configured. Deploy the oauth-relay service first.
+                                </Text>
+                            </Box>
+                        )}
+
+                        {googleStatus && (
+                            <Box
+                                marginTop={2}
+                                padding={2}
+                                backgroundColor={googleStatus.type === 'error' ? colors.RED_LIGHT_2 : colors.GREEN_LIGHT_2}
+                                borderRadius={2}
+                            >
+                                <Text textColor={googleStatus.type === 'error' ? 'red' : 'green'}>
+                                    {googleStatus.message}
+                                </Text>
+                            </Box>
+                        )}
+
+                        {/* Google Drive Settings - only show when connected */}
+                        {hasGoogleOAuth && (
+                            <>
+                                {/* Shared Drive ID */}
+                                <Box marginTop={3}>
+                                    <Text size="small" fontWeight="strong" marginBottom={1}>
+                                        Shared Drive ID (optional)
+                                    </Text>
+                                    {storedSharedDriveId ? (
+                                        <Box display="flex" alignItems="center">
+                                            <Text size="small" textColor="green" marginRight={2}>
+                                                ✓ {storedSharedDriveId}
+                                            </Text>
+                                            <Button
+                                                onClick={async () => {
+                                                    await globalConfig.setAsync(GOOGLE_SHARED_DRIVE_ID_KEY, undefined);
+                                                }}
+                                                icon="x"
+                                                variant="secondary"
+                                                size="small"
+                                            >
+                                                Clear
+                                            </Button>
+                                        </Box>
+                                    ) : (
+                                        <Box>
+                                            <Box display="flex" alignItems="center" marginBottom={1}>
+                                                <Input
+                                                    value={sharedDriveIdInput}
+                                                    onChange={(e) => setSharedDriveIdInput(e.target.value)}
+                                                    placeholder="Enter Shared Drive ID..."
+                                                    width="100%"
+                                                />
+                                                <Button
+                                                    onClick={async () => {
+                                                        if (sharedDriveIdInput.trim()) {
+                                                            await globalConfig.setAsync(GOOGLE_SHARED_DRIVE_ID_KEY, sharedDriveIdInput.trim());
+                                                            setSharedDriveIdInput('');
+                                                        }
+                                                    }}
+                                                    disabled={!sharedDriveIdInput.trim()}
+                                                    variant="primary"
+                                                    marginLeft={2}
+                                                    size="small"
+                                                >
+                                                    Save
+                                                </Button>
+                                            </Box>
+                                            <Text size="small" textColor="light">
+                                                From URL: drive.google.com/drive/folders/DRIVE_ID
+                                            </Text>
+                                        </Box>
+                                    )}
+                                </Box>
+
+                                {/* Parent Folder ID */}
+                                <Box marginTop={3}>
+                                    <Text size="small" fontWeight="strong" marginBottom={1}>
+                                        Parent Folder ID (optional)
+                                    </Text>
+                                    {storedParentFolderId ? (
+                                        <Box display="flex" alignItems="center">
+                                            <Text size="small" textColor="green" marginRight={2}>
+                                                ✓ {storedParentFolderId}
+                                            </Text>
+                                            <Button
+                                                onClick={async () => {
+                                                    await globalConfig.setAsync(GOOGLE_PARENT_FOLDER_ID_KEY, undefined);
+                                                }}
+                                                icon="x"
+                                                variant="secondary"
+                                                size="small"
+                                            >
+                                                Clear
+                                            </Button>
+                                        </Box>
+                                    ) : (
+                                        <Box>
+                                            <Box display="flex" alignItems="center" marginBottom={1}>
+                                                <Input
+                                                    value={parentFolderIdInput}
+                                                    onChange={(e) => setParentFolderIdInput(e.target.value)}
+                                                    placeholder="Enter Parent Folder ID..."
+                                                    width="100%"
+                                                />
+                                                <Button
+                                                    onClick={async () => {
+                                                        if (parentFolderIdInput.trim()) {
+                                                            await globalConfig.setAsync(GOOGLE_PARENT_FOLDER_ID_KEY, parentFolderIdInput.trim());
+                                                            setParentFolderIdInput('');
+                                                        }
+                                                    }}
+                                                    disabled={!parentFolderIdInput.trim()}
+                                                    variant="primary"
+                                                    marginLeft={2}
+                                                    size="small"
+                                                >
+                                                    Save
+                                                </Button>
+                                            </Box>
+                                            <Text size="small" textColor="light">
+                                                Subfolder where project folders will be created
+                                            </Text>
+                                        </Box>
+                                    )}
+                                </Box>
+
+                                {/* Template Document ID */}
+                                <Box marginTop={3}>
+                                    <Text size="small" fontWeight="strong" marginBottom={1}>
+                                        Scoping Template Document ID *
+                                    </Text>
+                                    {storedScopingTemplateId ? (
+                                        <Box display="flex" alignItems="center">
+                                            <Text size="small" textColor="green" marginRight={2}>
+                                                ✓ {storedScopingTemplateId}
+                                            </Text>
+                                            <Button
+                                                onClick={async () => {
+                                                    await globalConfig.setAsync(GOOGLE_SCOPING_TEMPLATE_ID_KEY, undefined);
+                                                }}
+                                                icon="x"
+                                                variant="secondary"
+                                                size="small"
+                                            >
+                                                Clear
+                                            </Button>
+                                        </Box>
+                                    ) : (
+                                        <Box>
+                                            <Box display="flex" alignItems="center" marginBottom={1}>
+                                                <Input
+                                                    value={templateIdInput}
+                                                    onChange={(e) => setTemplateIdInput(e.target.value)}
+                                                    placeholder="Enter Template Document ID..."
+                                                    width="100%"
+                                                />
+                                                <Button
+                                                    onClick={async () => {
+                                                        if (templateIdInput.trim()) {
+                                                            await globalConfig.setAsync(GOOGLE_SCOPING_TEMPLATE_ID_KEY, templateIdInput.trim());
+                                                            setTemplateIdInput('');
+                                                        }
+                                                    }}
+                                                    disabled={!templateIdInput.trim()}
+                                                    variant="primary"
+                                                    marginLeft={2}
+                                                    size="small"
+                                                >
+                                                    Save
+                                                </Button>
+                                            </Box>
+                                            <Text size="small" textColor="light">
+                                                From URL: docs.google.com/document/d/DOCUMENT_ID/edit
+                                            </Text>
+                                        </Box>
+                                    )}
+                                </Box>
+
+                                {!storedScopingTemplateId && (
+                                    <Box
+                                        marginTop={2}
+                                        padding={2}
+                                        backgroundColor={colors.YELLOW_LIGHT_2}
+                                        borderRadius={2}
+                                    >
+                                        <Text size="small">
+                                            Create a Google Doc template with placeholders like {'{{PROJECT_NAME}}'}, {'{{PROJECT_DESCRIPTION}}'}, etc.
+                                        </Text>
+                                    </Box>
+                                )}
+
+                                {/* Kick Off Deck Template ID */}
+                                <Box marginTop={3}>
+                                    <Text size="small" fontWeight="strong" marginBottom={1}>
+                                        Kick Off Deck Template ID (optional)
+                                    </Text>
+                                    {storedKickoffDeckTemplateId ? (
+                                        <Box display="flex" alignItems="center">
+                                            <Text size="small" textColor="green" marginRight={2}>
+                                                ✓ {storedKickoffDeckTemplateId}
+                                            </Text>
+                                            <Button
+                                                onClick={async () => {
+                                                    await globalConfig.setAsync(GOOGLE_KICKOFF_DECK_TEMPLATE_ID_KEY, undefined);
+                                                }}
+                                                icon="x"
+                                                variant="secondary"
+                                                size="small"
+                                            >
+                                                Clear
+                                            </Button>
+                                        </Box>
+                                    ) : (
+                                        <Box>
+                                            <Box display="flex" alignItems="center" marginBottom={1}>
+                                                <Input
+                                                    value={kickoffDeckTemplateIdInput}
+                                                    onChange={(e) => setKickoffDeckTemplateIdInput(e.target.value)}
+                                                    placeholder="Enter Slides Template ID..."
+                                                    width="100%"
+                                                />
+                                                <Button
+                                                    onClick={async () => {
+                                                        if (kickoffDeckTemplateIdInput.trim()) {
+                                                            await globalConfig.setAsync(GOOGLE_KICKOFF_DECK_TEMPLATE_ID_KEY, kickoffDeckTemplateIdInput.trim());
+                                                            setKickoffDeckTemplateIdInput('');
+                                                        }
+                                                    }}
+                                                    disabled={!kickoffDeckTemplateIdInput.trim()}
+                                                    variant="primary"
+                                                    marginLeft={2}
+                                                    size="small"
+                                                >
+                                                    Save
+                                                </Button>
+                                            </Box>
+                                            <Text size="small" textColor="light">
+                                                From URL: docs.google.com/presentation/d/PRESENTATION_ID/edit
+                                            </Text>
+                                        </Box>
+                                    )}
+                                </Box>
+                            </>
+                        )}
+                    </Box>
+                )}
+            </Box>
+
             <FormField label="Select Project" marginBottom={3}>
                 <Select
                     options={recordOptions}
@@ -1325,6 +2219,11 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                         setAsanaBoardUrl('');
                         setMilestoneStatuses({});
                         setCoordinatorMatch(null);
+                        // Reset Google Drive state
+                        setDriveDocResult(null);
+                        setShowCreateFolderPrompt(false);
+                        setPendingFolderName(null);
+                        setDeckResult(null);
                         setOwnerMatch(null);
                         setMemberAddStatus(null);
                     }}
@@ -1333,15 +2232,158 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                 />
             </FormField>
 
-            <Button
-                onClick={handleGenerate}
-                disabled={isGenerating || !selectedRecordId}
-                icon={isGenerating ? <Loader scale={0.2} /> : 'edit'}
-                variant="primary"
-                marginBottom={3}
-            >
-                {isGenerating ? 'Generating...' : 'Generate Scope of Work'}
-            </Button>
+            <Box display="flex" marginBottom={3}>
+                <Button
+                    onClick={handleGenerate}
+                    disabled={isGenerating || !selectedRecordId}
+                    icon={isGenerating ? <Loader scale={0.2} /> : 'edit'}
+                    variant="primary"
+                    marginRight={2}
+                >
+                    {isGenerating ? 'Generating...' : 'Generate Scope of Work'}
+                </Button>
+
+                {hasFullGoogleConfig && (
+                    <Button
+                        onClick={handleGenerateDriveDocument}
+                        disabled={isGeneratingDriveDoc || !selectedRecordId}
+                        icon={isGeneratingDriveDoc ? <Loader scale={0.2} /> : 'upload'}
+                        variant="secondary"
+                        marginRight={2}
+                    >
+                        {isGeneratingDriveDoc ? 'Creating...' : 'Generate Scoping Doc'}
+                    </Button>
+                )}
+
+            </Box>
+
+            {hasKickoffDeckConfig && (
+                <Box marginBottom={3}>
+                    <Button
+                        onClick={handleGenerateKickoffDeck}
+                        disabled={isGeneratingDeck || !selectedRecordId}
+                        icon={isGeneratingDeck ? <Loader scale={0.2} /> : 'upload'}
+                        variant="secondary"
+                    >
+                        {isGeneratingDeck ? 'Creating...' : 'Generate Kick Off Deck'}
+                    </Button>
+                </Box>
+            )}
+
+            {/* Folder creation prompt */}
+            {showCreateFolderPrompt && pendingFolderName && (
+                <Box
+                    padding={3}
+                    borderRadius={3}
+                    backgroundColor={colors.YELLOW_LIGHT_2}
+                    marginBottom={3}
+                    border="thick"
+                    borderColor={colors.YELLOW}
+                >
+                    <Text marginBottom={2}>
+                        No folder found for "{pendingFolderName}".
+                    </Text>
+                    <Text size="small" marginBottom={3}>
+                        Would you like to create a new project folder in Google Drive?
+                    </Text>
+                    <Box display="flex">
+                        <Button
+                            onClick={handleCreateFolderAndContinue}
+                            variant="primary"
+                            size="small"
+                            marginRight={2}
+                        >
+                            Create Folder
+                        </Button>
+                        <Button
+                            onClick={() => {
+                                setShowCreateFolderPrompt(false);
+                                setPendingFolderName(null);
+                            }}
+                            variant="secondary"
+                            size="small"
+                        >
+                            Cancel
+                        </Button>
+                    </Box>
+                </Box>
+            )}
+
+            {/* Google Drive document result */}
+            {driveDocResult && (
+                <Box
+                    padding={3}
+                    borderRadius={3}
+                    backgroundColor={colors.GREEN_LIGHT_2}
+                    marginBottom={3}
+                    border="thick"
+                    borderColor={colors.GREEN}
+                >
+                    <Heading size="xsmall" marginBottom={2}>
+                        Document Created in Google Drive
+                    </Heading>
+                    <Box marginBottom={2}>
+                        <Button
+                            onClick={() => window.open(driveDocResult.docUrl, '_blank')}
+                            icon="share1"
+                            size="small"
+                            variant="primary"
+                            marginRight={2}
+                        >
+                            Open Document
+                        </Button>
+                        <Button
+                            onClick={() => window.open(driveDocResult.folderUrl, '_blank')}
+                            icon="share1"
+                            size="small"
+                            variant="secondary"
+                        >
+                            Open Folder
+                        </Button>
+                    </Box>
+                    <Text size="small" textColor="light">
+                        {driveDocResult.docName}
+                    </Text>
+                </Box>
+            )}
+
+            {/* Kick Off Deck result */}
+            {deckResult && (
+                <Box
+                    padding={3}
+                    borderRadius={3}
+                    backgroundColor={colors.BLUE_LIGHT_2}
+                    marginBottom={3}
+                    border="thick"
+                    borderColor={colors.BLUE}
+                >
+                    <Heading size="xsmall" marginBottom={2}>
+                        Kick Off Deck Created
+                    </Heading>
+                    <Box marginBottom={2}>
+                        <Button
+                            onClick={() => window.open(deckResult.deckUrl, '_blank')}
+                            icon="share1"
+                            size="small"
+                            variant="primary"
+                            marginRight={2}
+                        >
+                            Open Presentation
+                        </Button>
+                        <Button
+                            onClick={() => window.open(deckResult.folderUrl, '_blank')}
+                            icon="share1"
+                            size="small"
+                            variant="secondary"
+                        >
+                            Open Folder
+                        </Button>
+                    </Box>
+                    <Text size="small" textColor="light">
+                        {deckResult.deckName}
+                    </Text>
+                </Box>
+            )}
 
             {status && (
                 <Box
@@ -1647,11 +2689,12 @@ ${milestoneSummary || '_No milestones linked yet. Add milestones in Airtable, th
                     How it works:
                 </Heading>
                 <Text size="small" textColor="light">
-                    1. Configure Asana PAT in Settings (optional, enables direct task creation){'\n'}
-                    2. Select a project from the dropdown{'\n'}
-                    3. Link the Asana board (create from template or paste existing URL){'\n'}
-                    4. Create Asana tasks for milestones (auto-saves task URL to Airtable){'\n'}
-                    5. Optionally generate Scope of Work document
+                    1. Configure Asana OAuth in Settings (enables direct task creation){'\n'}
+                    2. Configure Google Drive in Settings (enables document generation){'\n'}
+                    3. Select a project from the dropdown{'\n'}
+                    4. Link the Asana board (create from template or paste existing URL){'\n'}
+                    5. Create Asana tasks for milestones (auto-saves task URL to Airtable){'\n'}
+                    6. Generate Scope of Work to Airtable field or Google Drive
                 </Text>
             </Box>
         </Box>
