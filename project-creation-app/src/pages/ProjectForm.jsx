@@ -101,12 +101,12 @@ export default function ProjectForm() {
       description: '',
       objectives: '',
       roles: {
-        project_owner: [],
-        project_coordinator: [],
-        technical_support: [],
-        comms_support: [],
-        oversight: [],
-        other: [],
+        project_owner: { memberId: '', fte: '' },
+        project_coordinator: { memberId: '', fte: '' },
+        technical_support: { memberId: '', fte: '' },
+        comms_support: { memberId: '', fte: '' },
+        oversight: { memberId: '', fte: '' },
+        other: { memberId: '', fte: '' },
       },
       outcomes: [{ name: '', description: '', dueDate: '' }],
     },
@@ -202,11 +202,14 @@ export default function ProjectForm() {
         await airtable.createMilestones(projectId, validOutcomes);
       }
 
-      // 3. Create role assignments
+      // 3. Create role assignments (now with FTE)
       const roleAssignments = {};
-      for (const [roleKey, memberId] of Object.entries(data.roles)) {
-        if (memberId) {
-          roleAssignments[roleKey] = [memberId];
+      for (const [roleKey, roleData] of Object.entries(data.roles)) {
+        if (roleData?.memberId) {
+          roleAssignments[roleKey] = {
+            memberId: roleData.memberId,
+            fte: roleData.fte,
+          };
         }
       }
       if (Object.keys(roleAssignments).length > 0) {
@@ -221,7 +224,7 @@ export default function ProjectForm() {
 
           if (asanaTemplateGid && asanaTeamGid) {
             // Get coordinator name for Asana user matching
-            const coordinatorId = data.roles.project_coordinator;
+            const coordinatorId = data.roles.project_coordinator?.memberId;
             const coordinatorMember = teamMembers.find(m => m.id === coordinatorId);
 
             // Get Asana users for matching
@@ -241,7 +244,7 @@ export default function ProjectForm() {
               }
             }
 
-            const ownerId = data.roles.project_owner;
+            const ownerId = data.roles.project_owner?.memberId;
             const ownerMember = teamMembers.find(m => m.id === ownerId);
             if (ownerMember) {
               const match = asana.findBestUserMatch(ownerMember.name, asanaUsers);
@@ -469,23 +472,34 @@ export default function ProjectForm() {
                     key={role.key}
                     label={role.label}
                     required={role.required}
-                    error={errors.roles?.[role.key]}
+                    error={errors.roles?.[role.key]?.memberId}
                   >
-                    <select
-                      className="form-input"
-                      {...register(`roles.${role.key}`, {
-                        validate: role.required
-                          ? (v) => (v && v.length > 0) || `${role.label} is required`
-                          : undefined,
-                      })}
-                    >
-                      <option value="">Select team member...</option>
-                      {teamMembers.map((member) => (
-                        <option key={member.id} value={member.id}>
-                          {member.name}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex gap-3">
+                      <select
+                        className="form-input flex-1"
+                        {...register(`roles.${role.key}.memberId`, {
+                          validate: role.required
+                            ? (v) => (v && v.length > 0) || `${role.label} is required`
+                            : undefined,
+                        })}
+                      >
+                        <option value="">Select team member...</option>
+                        {teamMembers.map((member) => (
+                          <option key={member.id} value={member.id}>
+                            {member.name}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        className="form-input w-24"
+                        placeholder="% FTE"
+                        min="0"
+                        max="100"
+                        step="5"
+                        {...register(`roles.${role.key}.fte`)}
+                      />
+                    </div>
                   </FormField>
                 ))}
               </div>

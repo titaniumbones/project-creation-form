@@ -59,10 +59,11 @@ export async function getRecords(tableName, options = {}) {
   return data.records || [];
 }
 
-// Get team members for role assignment
+// Get team members for role assignment (Active only)
 export async function getTeamMembers() {
   const records = await getRecords('Data Team Members', {
-    fields: ['Full Name'],
+    fields: ['Full Name', 'Status'],
+    filterByFormula: "{Status} = 'Active'",
     sort: [{ field: 'Full Name', direction: 'asc' }],
   });
 
@@ -125,22 +126,33 @@ export async function createMilestones(projectId, milestones) {
 }
 
 // Create assignment records (role -> team member -> project)
+// roleAssignments: { role: { memberId, fte } } or { role: [{ memberId, fte }] }
 export async function createAssignments(projectId, roleAssignments) {
   if (!roleAssignments || Object.keys(roleAssignments).length === 0) return [];
 
   // Flatten role assignments into individual records
   const records = [];
-  for (const [role, memberIds] of Object.entries(roleAssignments)) {
-    if (!memberIds || memberIds.length === 0) continue;
+  for (const [role, assignment] of Object.entries(roleAssignments)) {
+    if (!assignment) continue;
 
-    for (const memberId of memberIds) {
-      records.push({
-        fields: {
-          'Role': role,
-          'Data Team Member': [memberId],
-          'Project': [projectId],
-        },
-      });
+    // Handle both single assignment and array of assignments
+    const assignments = Array.isArray(assignment) ? assignment : [assignment];
+
+    for (const { memberId, fte } of assignments) {
+      if (!memberId) continue;
+
+      const fields = {
+        'Role': role,
+        'Data Team Member': [memberId],
+        'Project': [projectId],
+      };
+
+      // Add % FTE if provided
+      if (fte !== undefined && fte !== null && fte !== '') {
+        fields['% FTE'] = parseFloat(fte);
+      }
+
+      records.push({ fields });
     }
   }
 
