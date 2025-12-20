@@ -31,6 +31,7 @@ exports.handler = async (event) => {
     'data.records:read',
     'data.records:write',
     'schema.bases:read',
+    'user.email:read',  // Needed for whoami endpoint to get user email
   ];
 
   authUrl.searchParams.set('client_id', process.env.AIRTABLE_CLIENT_ID);

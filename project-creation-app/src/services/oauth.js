@@ -104,14 +104,18 @@ export async function getCurrentUserEmail() {
     return cached.email;
   }
 
-  // Try to fetch from Airtable if connected
-  if (tokenManager.isTokenValid('airtable')) {
-    const token = tokenManager.getToken('airtable');
-    const userInfo = await fetchAirtableUserInfo(token.access_token);
-    if (userInfo?.email) {
-      userManager.setUserInfo(userInfo);
-      return userInfo.email;
+  // Try to fetch from Airtable if connected - use getValidToken to handle refresh
+  try {
+    const accessToken = await getValidToken('airtable');
+    if (accessToken) {
+      const userInfo = await fetchAirtableUserInfo(accessToken);
+      if (userInfo?.email) {
+        userManager.setUserInfo(userInfo);
+        return userInfo.email;
+      }
     }
+  } catch (err) {
+    console.warn('Failed to get user email from Airtable:', err);
   }
 
   return null;
@@ -121,8 +125,13 @@ export async function getCurrentUserEmail() {
 export async function getValidToken(service) {
   const token = tokenManager.getToken(service);
 
-  if (!token || !token.refresh_token) {
+  if (!token || !token.access_token) {
     return null;
+  }
+
+  // If no refresh token, just return access token and hope it's still valid
+  if (!token.refresh_token) {
+    return token.access_token;
   }
 
   // Check if token still valid (with 1 minute buffer)
