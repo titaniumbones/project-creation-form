@@ -162,3 +162,81 @@ type = "date"
 label = "Due Date"
 required = false
 airtable_field = "Due Date"
+
+# =============================================================================
+# AIRTABLE SCHEMA MAPPINGS
+# =============================================================================
+# Configure table names and field mappings for Airtable integration
+# Update these values if your Airtable schema changes
+
+[airtable]
+# Environment variable containing the base ID
+base_id_env = "VITE_AIRTABLE_BASE_ID"
+
+[airtable.tables]
+projects = "Projects"
+milestones = "Milestones"
+assignments = "Assignments"
+team_members = "Data Team Members"
+
+[airtable.team_members_fields]
+# Fields to fetch from team members table
+name = "Full Name"
+
+[airtable.project_fields]
+# Maps form data keys to Airtable Projects table field names
+name = "Project"
+acronym = "Project Acronym"
+description = "Project Description"
+objectives = "Objectives"
+start_date = "Start Date"
+end_date = "End Date"
+status = "Status"
+# URL fields populated after resource creation
+asana_url = "Asana Board"
+scoping_doc_url = "Scoping Doc"
+folder_url = "Project Folder"
+
+[airtable.project_defaults]
+# Default values for new projects
+status = "In Ideation"
+
+[airtable.milestone_fields]
+# Maps form data keys to Airtable Milestones table field names
+name = "Milestone"
+description = "Description"
+due_date = "Due Date"
+project_link = "Project"
+
+[airtable.assignment_fields]
+# Maps to Airtable Assignments table field names
+role = "Role"
+team_member_link = "Data Team Member"
+project_link = "Project"
+fte = "FTE"
+
+[airtable.role_values]
+# Maps form role keys to Airtable Role field dropdown values
+project_owner = "Owner"
+project_coordinator = "Project Coordinator"
+technical_support = "Other"
+comms_support = "Other"
+oversight = "Other"
+other = "Other"
+
+# =============================================================================
+# GOOGLE DOCS PLACEHOLDERS
+# =============================================================================
+# Configure placeholder tokens used in Google Doc/Slides templates
+# These get replaced with project data when documents are generated
+
+[google.placeholders]
+project_name = "{{PROJECT_NAME}}"
+project_acronym = "{{PROJECT_ACRONYM}}"
+project_description = "{{PROJECT_DESCRIPTION}}"
+objectives = "{{OBJECTIVES}}"
+start_date = "{{START_DATE}}"
+end_date = "{{END_DATE}}"
+project_owner = "{{PROJECT_OWNER}}"
+project_coordinator = "{{PROJECT_COORDINATOR}}"
+milestone_name = "{{MILESTONE_NAME}}"

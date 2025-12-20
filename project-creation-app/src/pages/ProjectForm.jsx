@@ -6,6 +6,7 @@ import HelpTooltip from '../components/ui/HelpTooltip';
 import { useTeamMembers } from '../hooks/useTeamMembers';
 import { getConnectionStatus } from '../services/oauth';
 import * as airtable from '../services/airtable';
+import { airtableProjectFields, airtableTables } from '../services/airtable';
 import * as asana from '../services/asana';
 import * as google from '../services/google';
 import {
@@ -487,18 +488,20 @@ export default function ProjectForm() {
 
       // Update project with URLs from other resources
       const urlUpdates = {};
+      const f = airtableProjectFields;
       if (createdResources.asanaUrl) {
-        urlUpdates['Asana Board'] = createdResources.asanaUrl;
+        urlUpdates[f.asana_url || 'Asana Board'] = createdResources.asanaUrl;
       }
       if (createdResources.scopingDocUrl) {
-        urlUpdates['Scoping Doc'] = createdResources.scopingDocUrl;
+        urlUpdates[f.scoping_doc_url || 'Scoping Doc'] = createdResources.scopingDocUrl;
       }
       if (createdResources.folderUrl) {
-        urlUpdates['Project Folder'] = createdResources.folderUrl;
+        urlUpdates[f.folder_url || 'Project Folder'] = createdResources.folderUrl;
       }
 
       if (Object.keys(urlUpdates).length > 0) {
-        await airtable.updateRecord('Projects', projectId, urlUpdates);
+        const tableName = airtableTables.projects || 'Projects';
+        await airtable.updateRecord(tableName, projectId, urlUpdates);
       }
 
       const airtableUrl = `https://airtable.com/${import.meta.env.VITE_AIRTABLE_BASE_ID}/${projectId}`;

@@ -1,5 +1,14 @@
 // Airtable API client
 import { getValidToken } from './oauth';
+import {
+  airtableTables,
+  airtableProjectFields,
+  airtableMilestoneFields,
+  airtableAssignmentFields,
+  airtableTeamMembersFields,
+  airtableProjectDefaults,
+  airtableRoleValues,
+} from '../config';
 
 const BASE_ID = import.meta.env.VITE_AIRTABLE_BASE_ID;
 const API_URL = 'https://api.airtable.com/v0';
@@ -59,33 +68,39 @@ export async function getRecords(tableName, options = {}) {
   return data.records || [];
 }
 
-// Get team members for role assignment (Active only)
+// Get team members for role assignment
 export async function getTeamMembers() {
-  const records = await getRecords('Data Team Members', {
-    fields: ['Full Name', 'Status'],
-    filterByFormula: "{Status} = 'Active'",
-    sort: [{ field: 'Full Name', direction: 'asc' }],
+  const tableName = airtableTables.team_members || 'Data Team Members';
+  const nameField = airtableTeamMembersFields.name || 'Full Name';
+
+  const records = await getRecords(tableName, {
+    fields: [nameField],
+    sort: [{ field: nameField, direction: 'asc' }],
   });
 
   return records.map(r => ({
     id: r.id,
-    name: r.fields['Full Name'],
+    name: r.fields[nameField],
   }));
 }
 
 // Create a project record
 export async function createProject(projectData) {
-  const data = await airtableRequest(encodeURIComponent('Projects'), {
+  const tableName = airtableTables.projects || 'Projects';
+  const f = airtableProjectFields;
+  const defaults = airtableProjectDefaults;
+
+  const data = await airtableRequest(encodeURIComponent(tableName), {
     method: 'POST',
     body: JSON.stringify({
       fields: {
-        'Project': projectData.name,
-        'Project Acronym': projectData.acronym || '',
-        'Project Description': projectData.description || '',
-        'Objectives': projectData.objectives || '',
-        'Start Date': projectData.startDate || null,
-        'End Date': projectData.endDate || null,
-        'Status': 'In Ideation',
+        [f.name || 'Project']: projectData.name,
+        [f.acronym || 'Project Acronym']: projectData.acronym || '',
+        [f.description || 'Project Description']: projectData.description || '',
+        [f.objectives || 'Objectives']: projectData.objectives || '',
+        [f.start_date || 'Start Date']: projectData.startDate || null,
+        [f.end_date || 'End Date']: projectData.endDate || null,
+        [f.status || 'Status']: defaults.status || 'In Ideation',
       },
     }),
   });
@@ -97,6 +112,9 @@ export async function createProject(projectData) {
 export async function createMilestones(projectId, milestones) {
   if (!milestones || milestones.length === 0) return [];
 
+  const tableName = airtableTables.milestones || 'Milestones';
+  const f = airtableMilestoneFields;
+
   // Airtable batch create (max 10 per request)
   const batches = [];
   for (let i = 0; i < milestones.length; i += 10) {
@@ -107,14 +125,14 @@ export async function createMilestones(projectId, milestones) {
   for (const batch of batches) {
     const records = batch.map(m => ({
       fields: {
-        'Milestone': m.name,
-        'Description': m.description || '',
-        'Due Date': m.dueDate || null,
-        'Project': [projectId], // Link to project
+        [f.name || 'Milestone']: m.name,
+        [f.description || 'Description']: m.description || '',
+        [f.due_date || 'Due Date']: m.dueDate || null,
+        [f.project_link || 'Project']: [projectId],
       },
     }));
 
-    const data = await airtableRequest(encodeURIComponent('Milestones'), {
+    const data = await airtableRequest(encodeURIComponent(tableName), {
       method: 'POST',
       body: JSON.stringify({ records }),
     });
@@ -130,9 +148,15 @@ export async function createMilestones(projectId, milestones) {
 export async function createAssignments(projectId, roleAssignments) {
   if (!roleAssignments || Object.keys(roleAssignments).length === 0) return [];
 
+  const tableName = airtableTables.assignments || 'Assignments';
+  const f = airtableAssignmentFields;
+  const roleValues = airtableRoleValues;
+
   // Flatten role assignments into individual records
   const records = [];
-  for (const [role, assignment] of Object.entries(roleAssignments)) {
+  for (const [roleKey, assignment] of Object.entries(roleAssignments)) {
+    // Map form role key to Airtable Role field value using config
+    const role = roleValues[roleKey] || 'Other';
     if (!assignment) continue;
 
     // Handle both single assignment and array of assignments
@@ -142,14 +166,13 @@ export async function createAssignments(projectId, roleAssignments) {
       if (!memberId) continue;
 
       const fields = {
-        'Role': role,
-        'Data Team Member': [memberId],
-        'Project': [projectId],
+        [f.role || 'Role']: role,
+        [f.team_member_link || 'Data Team Member']: [memberId],
+        [f.project_link || 'Project']: [projectId],
       };
 
-      // Add % FTE if provided
       if (fte !== undefined && fte !== null && fte !== '') {
-        fields['% FTE'] = parseFloat(fte);
+        fields[f.fte || 'FTE'] = parseFloat(fte);
       }
 
       records.push({ fields });
@@ -166,7 +189,7 @@ export async function createAssignments(projectId, roleAssignments) {
 
   const results = [];
   for (const batch of batches) {
-    const data = await airtableRequest(encodeURIComponent('Assignments'), {
+    const data = await airtableRequest(encodeURIComponent(tableName), {
       method: 'POST',
       body: JSON.stringify({ records: batch }),
     });
@@ -186,6 +209,9 @@ export async function updateRecord(tableName, recordId, fields) {
 
   return data;
 }
+
+// Export config for use in other modules
+export { airtableProjectFields, airtableTables };
 
 export default {
   getRecords,
