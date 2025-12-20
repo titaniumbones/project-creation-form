@@ -215,6 +215,8 @@ export default function ReviewDraft() {
           const transformedData = transformDataWithRoleNames(data);
           const replacements = google.buildReplacements(transformedData);
           await google.populateDoc(doc.id, replacements);
+          // Populate tables for milestones and staff
+          await google.populateDocWithTables(doc.id, transformedData, teamMembers);
           const scopingDocUrl = google.getDocUrl(doc.id);
           setCreatedResources(prev => ({ ...prev, scopingDocId: doc.id, scopingDocUrl }));
         }

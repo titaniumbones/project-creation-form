@@ -195,12 +195,13 @@ end_date = "End Date"
 status = "Status"
 # URL fields populated after resource creation
 asana_url = "Asana Board"
-scoping_doc_url = "Scoping Doc"
+scoping_doc_url = "Project Scope"
 folder_url = "Project Folder"
+
 
 [airtable.project_defaults]
 # Default values for new projects
-status = "In Ideation"
+status = "Active"
 
 [airtable.milestone_fields]
 # Maps form data keys to Airtable Milestones table field names
@@ -232,15 +233,19 @@ other = "Other"
 # These get replaced with project data when documents are generated
 
 [google.placeholders]
-project_name = "{{PROJECT_NAME}}"
+project_name = "{{PROJECT_TITLE}}"
 project_acronym = "{{PROJECT_ACRONYM}}"
 project_description = "{{PROJECT_DESCRIPTION}}"
 objectives = "{{OBJECTIVES}}"
 start_date = "{{START_DATE}}"
 end_date = "{{END_DATE}}"
+created_date = "{{CREATED_DATE}}"
 project_owner = "{{PROJECT_OWNER}}"
 project_coordinator = "{{PROJECT_COORDINATOR}}"
 milestone_name = "{{MILESTONE_NAME}}"
+# Table placeholders - these get replaced with formatted tables
+milestones = "{{MILESTONES}}"
+staff_table = "{{STAFF_TABLE}}"
 
 # =============================================================================
 # DRAFT / APPROVAL WORKFLOW

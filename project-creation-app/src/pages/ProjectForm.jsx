@@ -370,6 +370,9 @@ export default function ProjectForm() {
       const replacements = google.buildReplacements(transformedData);
       await google.populateDoc(doc.id, replacements);
 
+      // Populate tables for milestones and staff
+      await google.populateDocWithTables(doc.id, transformedData, teamMembers);
+
       const scopingDocUrl = google.getDocUrl(doc.id);
       updateCreatedResources({ googleFolderId: folderId, folderUrl, scopingDocId: doc.id, scopingDocUrl });
     } catch (err) {
