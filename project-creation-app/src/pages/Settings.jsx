@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import {
@@ -6,12 +6,15 @@ import {
   CheckCircleIcon,
   XCircleIcon,
   ArrowPathIcon,
+  UserCircleIcon,
 } from '@heroicons/react/24/outline';
 import {
   startOAuthFlow,
   disconnectService,
   getConnectionStatus,
+  userManager,
 } from '../services/oauth';
+import { useTeamMembers } from '../hooks/useTeamMembers';
 
 // Service configuration
 const services = [
@@ -99,6 +102,26 @@ export default function Settings() {
   const [connectionStatus, setConnectionStatus] = useState(getConnectionStatus);
   const [loadingService, setLoadingService] = useState(null);
   const [error, setError] = useState(null);
+  const [selectedProfile, setSelectedProfile] = useState(userManager.getTeamMemberId() || '');
+
+  // Fetch team members when Airtable is connected
+  const { data: teamMembers = [], isLoading: loadingMembers } = useTeamMembers();
+
+  // Update selectedProfile when it changes externally (e.g., on initial load)
+  useEffect(() => {
+    const storedId = userManager.getTeamMemberId();
+    if (storedId && storedId !== selectedProfile) {
+      setSelectedProfile(storedId);
+    }
+  }, []);
+
+  const handleProfileChange = (e) => {
+    const memberId = e.target.value;
+    setSelectedProfile(memberId);
+    if (memberId) {
+      userManager.setTeamMemberId(memberId);
+    }
+  };
 
   const handleConnect = async (serviceKey) => {
     setLoadingService(serviceKey);
@@ -150,6 +173,48 @@ export default function Settings() {
             )}
           </p>
         </div>
+
+        {/* Your Profile Section */}
+        {connectionStatus.airtable && (
+          <div className="mb-6 bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-start space-x-4">
+              <div className="text-3xl">
+                <UserCircleIcon className="w-8 h-8 text-gray-400" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-gray-900 mb-1">Your Profile</h3>
+                <p className="text-sm text-gray-500 mb-3">
+                  Select yourself from the team members list. This is used to track who creates drafts.
+                </p>
+                {loadingMembers ? (
+                  <div className="flex items-center text-sm text-gray-500">
+                    <ArrowPathIcon className="w-4 h-4 animate-spin mr-2" />
+                    Loading team members...
+                  </div>
+                ) : (
+                  <select
+                    value={selectedProfile}
+                    onChange={handleProfileChange}
+                    className="w-full max-w-md px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select your name...</option>
+                    {teamMembers.map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {selectedProfile && (
+                  <p className="mt-2 text-sm text-green-600 flex items-center">
+                    <CheckCircleIcon className="w-4 h-4 mr-1" />
+                    Profile saved
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Error message */}
         {error && (

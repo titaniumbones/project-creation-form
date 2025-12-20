@@ -5,7 +5,7 @@ import Header from '../components/layout/Header';
 import HelpTooltip from '../components/ui/HelpTooltip';
 import ShareDraftModal from '../components/ui/ShareDraftModal';
 import { useTeamMembers } from '../hooks/useTeamMembers';
-import { getConnectionStatus, getCurrentUserEmail } from '../services/oauth';
+import { getConnectionStatus, userManager } from '../services/oauth';
 import * as airtable from '../services/airtable';
 import { airtableProjectFields, airtableTables } from '../services/airtable';
 import * as asana from '../services/asana';
@@ -599,11 +599,10 @@ export default function ProjectForm() {
         throw new Error('Please connect to Airtable first to save drafts');
       }
 
-      // Try to get user email, but don't require it
-      let userEmail = await getCurrentUserEmail();
-      if (!userEmail) {
-        // Fallback: use a placeholder - the user can still save drafts
-        userEmail = 'unknown@user';
+      // Get current user's team member ID (set in Settings)
+      const teamMemberId = userManager.getTeamMemberId();
+      if (!teamMemberId) {
+        throw new Error('Please select your profile in Settings first');
       }
 
       const formData = getFormData();
@@ -614,7 +613,7 @@ export default function ProjectForm() {
         setDraftMessage({ type: 'success', text: 'Draft updated successfully' });
       } else {
         // Create new draft
-        const result = await drafts.createDraft(formData, userEmail);
+        const result = await drafts.createDraft(formData, teamMemberId);
         setCurrentDraftId(result.id);
         setDraftShareToken(result.shareToken);
         setDraftStatus('Draft');

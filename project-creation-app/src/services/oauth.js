@@ -69,6 +69,18 @@ export const userManager = {
     const info = this.getUserInfo();
     return info?.email || null;
   },
+
+  // Get/set current user's team member ID (selected in Settings)
+  getTeamMemberId() {
+    const info = this.getUserInfo();
+    return info?.teamMemberId || null;
+  },
+
+  setTeamMemberId(memberId) {
+    const info = this.getUserInfo() || {};
+    info.teamMemberId = memberId;
+    this.setUserInfo(info);
+  },
 };
 
 // Fetch current user info from Airtable

@@ -56,7 +56,7 @@ function generateShareToken() {
 }
 
 // Create a new draft
-export async function createDraft(formData, creatorEmail) {
+export async function createDraft(formData, creatorMemberId) {
   const tableName = airtableTables.drafts || 'Project Drafts';
   const f = airtableDraftFields;
   const statusValues = airtableDraftStatusValues;
@@ -67,13 +67,17 @@ export async function createDraft(formData, creatorEmail) {
     [f.project_name || 'Project Name']: formData.projectName || 'Untitled Draft',
     [f.draft_data || 'Draft Data']: JSON.stringify(formData),
     [f.status || 'Status']: statusValues.draft || 'Draft',
-    [f.created_by || 'Created By']: creatorEmail,
     [f.share_token || 'Share Token']: shareToken,
   };
 
+  // Link to team member if provided
+  if (creatorMemberId) {
+    fields[f.created_by_member || 'Created By Member'] = [creatorMemberId];
+  }
+
   debugLogger.log('drafts', 'Creating new draft', {
     projectName: formData.projectName,
-    creatorEmail,
+    creatorMemberId,
     shareToken,
   });
 
@@ -236,26 +240,21 @@ export async function requestChanges(recordId, notes) {
   };
 }
 
-// Get all drafts for a user
-export async function getUserDrafts(userEmail) {
+// Get all drafts for a user (by team member ID)
+export async function getUserDrafts(teamMemberId) {
   const tableName = airtableTables.drafts || 'Project Drafts';
   const f = airtableDraftFields;
 
-  const createdByField = f.created_by || 'Created By';
-  const filterFormula = `{${createdByField}} = "${userEmail.replace(/"/g, '\\"')}"`;
+  // Filter by linked team member record
+  const createdByField = f.created_by_member || 'Created By Member';
+  const filterFormula = `FIND("${teamMemberId}", ARRAYJOIN(RECORD_ID({${createdByField}})))`;
 
-  const params = new URLSearchParams({
-    filterByFormula: filterFormula,
-    sort: JSON.stringify([{ field: 'Created At', direction: 'desc' }]),
-  });
-
-  // Note: Airtable API uses sort[0][field] format, not JSON
   const sortParams = new URLSearchParams();
   sortParams.set('filterByFormula', filterFormula);
-  sortParams.set('sort[0][field]', f.created_at || 'Created At');
+  sortParams.set('sort[0][field]', 'Created');  // Airtable auto-created timestamp
   sortParams.set('sort[0][direction]', 'desc');
 
-  debugLogger.log('drafts', 'Fetching user drafts', { userEmail });
+  debugLogger.log('drafts', 'Fetching user drafts', { teamMemberId });
 
   const data = await draftRequest(`${encodeURIComponent(tableName)}?${sortParams}`);
 
@@ -263,7 +262,7 @@ export async function getUserDrafts(userEmail) {
     id: record.id,
     projectName: record.fields[f.project_name || 'Project Name'],
     status: record.fields[f.status || 'Status'],
-    createdAt: record.fields[f.created_at || 'Created At'],
+    createdAt: record.createdTime,
     approverNotes: record.fields[f.approver_notes || 'Approver Notes'],
     shareToken: record.fields[f.share_token || 'Share Token'],
   }));
