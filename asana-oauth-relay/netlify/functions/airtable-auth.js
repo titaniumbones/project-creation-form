@@ -41,6 +41,13 @@ exports.handler = async (event) => {
   authUrl.searchParams.set('code_challenge', codeChallenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
 
+  // Pre-select the base in the consent screen (if supported)
+  // Can be overridden via AIRTABLE_DEFAULT_BASE env var
+  const defaultBase = process.env.AIRTABLE_DEFAULT_BASE || 'app2FYvkqaFiPzz2o';
+  if (defaultBase) {
+    authUrl.searchParams.set('base', defaultBase);
+  }
+
   return {
     statusCode: 302,
     headers: { Location: authUrl.toString() },
