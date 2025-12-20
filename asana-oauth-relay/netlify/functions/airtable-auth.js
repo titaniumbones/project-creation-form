@@ -27,11 +27,11 @@ exports.handler = async (event) => {
   const state = Buffer.from(JSON.stringify(stateData)).toString('base64url');
 
   // Required scopes for project creation app
+  // Note: whoami endpoint works without special scope
   const scopes = [
     'data.records:read',
     'data.records:write',
     'schema.bases:read',
-    'user.email:read',  // Needed for whoami endpoint to get user email
   ];
 
   authUrl.searchParams.set('client_id', process.env.AIRTABLE_CLIENT_ID);
@@ -41,13 +41,6 @@ exports.handler = async (event) => {
   authUrl.searchParams.set('state', state);
   authUrl.searchParams.set('code_challenge', codeChallenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
-
-  // Pre-select the base in the consent screen (if supported)
-  // Can be overridden via AIRTABLE_DEFAULT_BASE env var
-  const defaultBase = process.env.AIRTABLE_DEFAULT_BASE || 'app2FYvkqaFiPzz2o';
-  if (defaultBase) {
-    authUrl.searchParams.set('base', defaultBase);
-  }
 
   return {
     statusCode: 302,
