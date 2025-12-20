@@ -28,12 +28,11 @@ exports.handler = async (event) => {
 
   // Required scopes for project creation app
   // Note: whoami endpoint works without special scope
-  // IMPORTANT: offline_access is required to receive refresh tokens
+  // Refresh tokens are automatically provided with PKCE flow
   const scopes = [
     'data.records:read',
     'data.records:write',
     'schema.bases:read',
-    'offline_access',
   ];
 
   authUrl.searchParams.set('client_id', process.env.AIRTABLE_CLIENT_ID);
