@@ -1,6 +1,7 @@
 // Google Workspace API client (Drive, Docs, Slides)
 import { getValidToken } from './oauth';
 import { debugLogger } from './debugLogger';
+import { googlePlaceholders } from '../config';
 
 async function getAccessToken() {
   const token = await getValidToken('google');
@@ -211,6 +212,7 @@ export function getFolderUrl(folderId) {
 }
 
 // Build placeholder replacements from project data
+// Uses placeholder values from config/fields.toml [google.placeholders]
 export function buildReplacements(projectData) {
   const formatDate = (dateStr) => {
     if (!dateStr) return 'TBD';
@@ -241,18 +243,21 @@ export function buildReplacements(projectData) {
     endDate: projectData.endDate,
     roles: projectData.roles,
     rolesKeys: Object.keys(projectData.roles || {}),
+    configuredPlaceholders: googlePlaceholders,
   });
 
+  // Use placeholder values from config, with fallbacks
+  const p = googlePlaceholders;
   const replacements = {
-    '{{PROJECT_NAME}}': projectData.projectName || '',
-    '{{PROJECT_ACRONYM}}': projectData.projectAcronym || '',
-    '{{PROJECT_DESCRIPTION}}': projectData.description || '',
-    '{{OBJECTIVES}}': projectData.objectives || '',
-    '{{START_DATE}}': formatDate(projectData.startDate),
-    '{{END_DATE}}': formatDate(projectData.endDate),
-    '{{CREATED_DATE}}': today,
-    '{{PROJECT_OWNER}}': projectData.roles?.project_owner?.name || '',
-    '{{PROJECT_COORDINATOR}}': projectData.roles?.project_coordinator?.name || '',
+    [p.project_name || '{{PROJECT_NAME}}']: projectData.projectName || '',
+    [p.project_acronym || '{{PROJECT_ACRONYM}}']: projectData.projectAcronym || '',
+    [p.project_description || '{{PROJECT_DESCRIPTION}}']: projectData.description || '',
+    [p.objectives || '{{OBJECTIVES}}']: projectData.objectives || '',
+    [p.start_date || '{{START_DATE}}']: formatDate(projectData.startDate),
+    [p.end_date || '{{END_DATE}}']: formatDate(projectData.endDate),
+    [p.created_date || '{{CREATED_DATE}}']: today,
+    [p.project_owner || '{{PROJECT_OWNER}}']: projectData.roles?.project_owner?.name || '',
+    [p.project_coordinator || '{{PROJECT_COORDINATOR}}']: projectData.roles?.project_coordinator?.name || '',
   };
 
   // Log the actual replacements that will be made
