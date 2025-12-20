@@ -293,13 +293,39 @@ export default function ProjectForm() {
         throw new Error('No outcomes to create');
       }
 
-      // Create tasks for each outcome
+      // Get Project Coordinator's Asana user GID for assignment
+      let coordinatorAsanaGid = null;
+      const coordinatorId = data.roles.project_coordinator?.memberId;
+      const coordinatorMember = teamMembers.find(m => m.id === coordinatorId);
+
+      if (coordinatorMember) {
+        // Get Asana users to find coordinator
+        const user = await asana.getCurrentUser();
+        const workspaceGid = user.workspaces?.[0]?.gid;
+        if (workspaceGid) {
+          const asanaUsers = await asana.getWorkspaceUsers(workspaceGid);
+          const match = asana.findBestUserMatch(coordinatorMember.name, asanaUsers);
+          if (match?.user?.gid) {
+            coordinatorAsanaGid = match.user.gid;
+            debugLogger.log('asana', 'Assigning milestones to coordinator', {
+              coordinatorName: coordinatorMember.name,
+              asanaUserGid: coordinatorAsanaGid,
+            });
+          }
+        }
+      }
+
+      // Create tasks for each outcome, assigned to coordinator
       for (const outcome of validOutcomes) {
-        await asana.createTask(createdResources.asanaProjectGid, {
-          name: outcome.name,
-          description: outcome.description || '',
-          dueDate: outcome.dueDate,
-        });
+        await asana.createTask(
+          createdResources.asanaProjectGid,
+          {
+            name: outcome.name,
+            description: outcome.description || '',
+            dueDate: outcome.dueDate,
+          },
+          coordinatorAsanaGid
+        );
       }
 
       updateCreatedResources({ asanaMilestonesCreated: true });
@@ -314,17 +340,43 @@ export default function ProjectForm() {
   const transformDataWithRoleNames = (data) => {
     const transformedData = { ...data, roles: {} };
 
+    debugLogger.log('form', 'Transform roles - input', {
+      rawRoles: data.roles,
+      teamMembersAvailable: teamMembers.length,
+      teamMemberIds: teamMembers.map(m => ({ id: m.id, name: m.name })),
+    });
+
     for (const [roleKey, roleData] of Object.entries(data.roles || {})) {
-      if (roleData?.memberId) {
-        const member = teamMembers.find(m => m.id === roleData.memberId);
-        transformedData.roles[roleKey] = {
-          ...roleData,
-          name: member?.name || '',
-        };
+      const memberId = roleData?.memberId;
+
+      // Skip empty/unassigned roles
+      if (!memberId) {
+        debugLogger.log('form', `Role ${roleKey}: skipped (no memberId)`);
+        continue;
       }
+
+      const member = teamMembers.find(m => m.id === memberId);
+      const memberName = member?.name || '';
+
+      debugLogger.log('form', `Role ${roleKey}: processing`, {
+        memberId,
+        memberFound: !!member,
+        memberName,
+        fte: roleData.fte,
+      });
+
+      transformedData.roles[roleKey] = {
+        memberId,
+        fte: roleData.fte || '',
+        name: memberName,
+      };
     }
 
-    debugLogger.logTransform('formRoles', 'googleRoles', data.roles, transformedData.roles);
+    debugLogger.log('form', 'Transform roles - output', {
+      transformedRoles: transformedData.roles,
+      roleCount: Object.keys(transformedData.roles).length,
+    });
+
     return transformedData;
   };
 

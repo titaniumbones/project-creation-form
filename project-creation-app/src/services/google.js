@@ -313,52 +313,121 @@ export async function insertTableAtPlaceholder(documentId, placeholder, tableDat
   // Get updated document to find table cell indices
   const updatedDoc = await getDocument(documentId);
 
-  // Find the table we just inserted (it should be near the placeholder index)
-  const tableElement = findTableNearIndex(updatedDoc, placeholderIndex);
+  // Find the table we just inserted (use expected dimensions to avoid finding wrong table)
+  const tableElement = findTableNearIndex(updatedDoc, placeholderIndex, numRows, numCols);
 
   if (!tableElement) {
     debugLogger.log('google', 'Could not find inserted table');
     return null;
   }
 
-  // Build requests to populate table cells
-  const cellRequests = [];
+  // Table styling configuration
+  const headerBgColor = { red: 0.2, green: 0.2, blue: 0.3 }; // Dark gray-blue
+  const headerTextColor = { red: 1, green: 1, blue: 1 }; // White
+  const dataTextColor = { red: 0, green: 0, blue: 0 }; // Black for data rows
+  const cellPadding = { magnitude: 5, unit: 'PT' };
 
-  // Populate header row
-  const headerRow = tableElement.table.tableRows[0];
-  for (let col = 0; col < headers.length; col++) {
-    const cell = headerRow.tableCells[col];
-    const cellIndex = getCellInsertIndex(cell);
-    if (cellIndex !== null) {
-      cellRequests.push({
-        insertText: {
-          location: { index: cellIndex },
-          text: headers[col],
-        },
-      });
-      // Make header bold
-      cellRequests.push({
-        updateTextStyle: {
-          range: {
-            startIndex: cellIndex,
-            endIndex: cellIndex + headers[col].length,
+  // Get table start index for cell styling
+  const tableStartIndex = tableElement.startIndex;
+
+  // STEP 1: Apply cell styling (background colors, padding) - order doesn't matter
+  const styleRequests = [];
+
+  // Style header cells
+  for (let col = 0; col < numCols; col++) {
+    styleRequests.push({
+      updateTableCellStyle: {
+        tableRange: {
+          tableCellLocation: {
+            tableStartLocation: { index: tableStartIndex },
+            rowIndex: 0,
+            columnIndex: col,
           },
-          textStyle: { bold: true },
-          fields: 'bold',
+          rowSpan: 1,
+          columnSpan: 1,
+        },
+        tableCellStyle: {
+          backgroundColor: { color: { rgbColor: headerBgColor } },
+          paddingTop: cellPadding,
+          paddingBottom: cellPadding,
+          paddingLeft: cellPadding,
+          paddingRight: cellPadding,
+        },
+        fields: 'backgroundColor,paddingTop,paddingBottom,paddingLeft,paddingRight',
+      },
+    });
+  }
+
+  // Style data cells (padding only)
+  for (let row = 0; row < tableData.length; row++) {
+    for (let col = 0; col < numCols; col++) {
+      styleRequests.push({
+        updateTableCellStyle: {
+          tableRange: {
+            tableCellLocation: {
+              tableStartLocation: { index: tableStartIndex },
+              rowIndex: row + 1,
+              columnIndex: col,
+            },
+            rowSpan: 1,
+            columnSpan: 1,
+          },
+          tableCellStyle: {
+            paddingTop: cellPadding,
+            paddingBottom: cellPadding,
+            paddingLeft: cellPadding,
+            paddingRight: cellPadding,
+          },
+          fields: 'paddingTop,paddingBottom,paddingLeft,paddingRight',
         },
       });
     }
   }
 
-  // Populate data rows
+  // Execute cell styling
+  if (styleRequests.length > 0) {
+    const styleResponse = await fetch(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ requests: styleRequests }),
+    });
+
+    if (!styleResponse.ok) {
+      const error = await styleResponse.json().catch(() => ({}));
+      debugLogger.log('google', 'Failed to apply cell styling', error);
+    }
+  }
+
+  // STEP 2: Insert all text (in reverse order to maintain indices)
+  const textRequests = [];
+
+  // Collect header text insertions
+  const headerRow = tableElement.table.tableRows[0];
+  for (let col = 0; col < headers.length; col++) {
+    const cell = headerRow.tableCells[col];
+    const cellIndex = getCellInsertIndex(cell);
+    if (cellIndex !== null) {
+      textRequests.push({
+        insertText: {
+          location: { index: cellIndex },
+          text: headers[col],
+        },
+      });
+    }
+  }
+
+  // Collect data text insertions
   for (let row = 0; row < tableData.length; row++) {
-    const tableRow = tableElement.table.tableRows[row + 1]; // +1 to skip header
+    const tableRow = tableElement.table.tableRows[row + 1];
     for (let col = 0; col < headers.length; col++) {
       const cell = tableRow.tableCells[col];
       const cellIndex = getCellInsertIndex(cell);
       const cellValue = tableData[row][col] || '';
       if (cellIndex !== null && cellValue) {
-        cellRequests.push({
+        textRequests.push({
           insertText: {
             location: { index: cellIndex },
             text: cellValue,
@@ -368,23 +437,93 @@ export async function insertTableAtPlaceholder(documentId, placeholder, tableDat
     }
   }
 
-  if (cellRequests.length > 0) {
-    // Execute cell population (in reverse order to maintain indices)
-    cellRequests.reverse();
+  // Execute text insertions in reverse order
+  if (textRequests.length > 0) {
+    textRequests.reverse();
 
-    const populateResponse = await fetch(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
+    const textResponse = await fetch(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ requests: cellRequests }),
+      body: JSON.stringify({ requests: textRequests }),
     });
 
-    if (!populateResponse.ok) {
-      const error = await populateResponse.json().catch(() => ({}));
-      debugLogger.logApiResponse('google', `/documents/${documentId}:batchUpdate (populate)`, error, new Error(error.error?.message || 'Failed to populate table'));
-      throw new Error(error.error?.message || 'Failed to populate table');
+    if (!textResponse.ok) {
+      const error = await textResponse.json().catch(() => ({}));
+      debugLogger.logApiResponse('google', `/documents/${documentId}:batchUpdate (text)`, error, new Error(error.error?.message || 'Failed to insert text'));
+      throw new Error(error.error?.message || 'Failed to insert text');
+    }
+  }
+
+  // STEP 3: Apply text formatting (need fresh document to get correct indices)
+  const formattedDoc = await getDocument(documentId);
+  const formattedTable = findTableNearIndex(formattedDoc, placeholderIndex, numRows, numCols);
+
+  if (formattedTable) {
+    const formatRequests = [];
+
+    // Format header text (bold, white)
+    const fmtHeaderRow = formattedTable.table.tableRows[0];
+    for (let col = 0; col < headers.length; col++) {
+      const cell = fmtHeaderRow.tableCells[col];
+      const content = cell?.content?.[0]?.paragraph?.elements?.[0];
+      if (content?.textRun?.content?.trim()) {
+        formatRequests.push({
+          updateTextStyle: {
+            range: {
+              startIndex: content.startIndex,
+              endIndex: content.endIndex - 1, // Exclude trailing newline
+            },
+            textStyle: {
+              bold: true,
+              foregroundColor: { color: { rgbColor: headerTextColor } },
+            },
+            fields: 'bold,foregroundColor',
+          },
+        });
+      }
+    }
+
+    // Format data text (ensure black color)
+    for (let row = 0; row < tableData.length; row++) {
+      const fmtDataRow = formattedTable.table.tableRows[row + 1];
+      for (let col = 0; col < numCols; col++) {
+        const cell = fmtDataRow?.tableCells?.[col];
+        const content = cell?.content?.[0]?.paragraph?.elements?.[0];
+        if (content?.textRun?.content?.trim()) {
+          formatRequests.push({
+            updateTextStyle: {
+              range: {
+                startIndex: content.startIndex,
+                endIndex: content.endIndex - 1,
+              },
+              textStyle: {
+                bold: false,
+                foregroundColor: { color: { rgbColor: dataTextColor } },
+              },
+              fields: 'bold,foregroundColor',
+            },
+          });
+        }
+      }
+    }
+
+    if (formatRequests.length > 0) {
+      const formatResponse = await fetch(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ requests: formatRequests }),
+      });
+
+      if (!formatResponse.ok) {
+        const error = await formatResponse.json().catch(() => ({}));
+        debugLogger.log('google', 'Failed to apply text formatting', error);
+      }
     }
   }
 
@@ -392,24 +531,67 @@ export async function insertTableAtPlaceholder(documentId, placeholder, tableDat
   return { rows: numRows, cols: numCols };
 }
 
-// Find a table near a given index
-function findTableNearIndex(doc, targetIndex) {
+// Find a table near a given index with expected dimensions
+function findTableNearIndex(doc, targetIndex, expectedRows = null, expectedCols = null) {
   const content = doc.body?.content || [];
+  const tables = [];
 
-  for (const element of content) {
-    if (element.table && element.startIndex <= targetIndex + 10) {
-      return element;
-    }
-  }
-
-  // Fallback: return first table found
+  // Collect all tables with their positions
   for (const element of content) {
     if (element.table) {
-      return element;
+      const numRows = element.table.tableRows?.length || 0;
+      const numCols = element.table.tableRows?.[0]?.tableCells?.length || 0;
+      tables.push({
+        element,
+        startIndex: element.startIndex,
+        endIndex: element.endIndex,
+        numRows,
+        numCols,
+        distance: Math.abs(element.startIndex - targetIndex),
+      });
     }
   }
 
-  return null;
+  debugLogger.log('google', 'Finding table near index', {
+    targetIndex,
+    expectedRows,
+    expectedCols,
+    tablesFound: tables.map(t => ({
+      startIndex: t.startIndex,
+      rows: t.numRows,
+      cols: t.numCols,
+      distance: t.distance,
+    })),
+  });
+
+  if (tables.length === 0) {
+    return null;
+  }
+
+  // If we have expected dimensions, prefer tables that match
+  if (expectedRows !== null && expectedCols !== null) {
+    const matchingTables = tables.filter(
+      t => t.numRows === expectedRows && t.numCols === expectedCols
+    );
+
+    if (matchingTables.length > 0) {
+      // Return the matching table closest to target index
+      matchingTables.sort((a, b) => a.distance - b.distance);
+      debugLogger.log('google', 'Found matching table by dimensions', {
+        startIndex: matchingTables[0].startIndex,
+        rows: matchingTables[0].numRows,
+      });
+      return matchingTables[0].element;
+    }
+  }
+
+  // Fallback: find table closest to target index
+  tables.sort((a, b) => a.distance - b.distance);
+  debugLogger.log('google', 'Using closest table', {
+    startIndex: tables[0].startIndex,
+    rows: tables[0].numRows,
+  });
+  return tables[0].element;
 }
 
 // Get the insert index for a table cell
@@ -458,21 +640,69 @@ export function buildStaffTableData(roles, teamMembers) {
     other: 'Other',
   };
 
+  debugLogger.log('google', 'Building staff table data - start', {
+    rolesReceived: roles,
+    rolesType: typeof roles,
+    rolesKeys: roles ? Object.keys(roles) : 'null/undefined',
+    teamMembersCount: teamMembers?.length || 0,
+  });
+
+  // Handle null/undefined roles
+  if (!roles || typeof roles !== 'object') {
+    debugLogger.log('google', 'No valid roles object received');
+    return [];
+  }
+
   const staffData = [];
 
-  for (const [roleKey, roleData] of Object.entries(roles || {})) {
-    if (roleData?.memberId) {
-      const member = teamMembers?.find(m => m.id === roleData.memberId);
-      const memberName = member?.name || roleData.name || 'TBD';
-      const fte = roleData.fte ? `${roleData.fte}%` : 'TBD';
+  for (const [roleKey, roleData] of Object.entries(roles)) {
+    debugLogger.log('google', `Evaluating role: ${roleKey}`, {
+      roleData: JSON.stringify(roleData),
+      roleDataType: typeof roleData,
+      memberId: roleData?.memberId,
+      memberIdTruthy: !!roleData?.memberId,
+      name: roleData?.name,
+      nameTruthy: !!roleData?.name,
+      fte: roleData?.fte,
+    });
 
-      staffData.push([
-        roleLabels[roleKey] || roleKey,
+    // Include role if it has a name (already resolved from transform)
+    // or memberId (will look up from teamMembers)
+    const hasName = roleData?.name && roleData.name.trim() !== '';
+    const hasMemberId = roleData?.memberId && roleData.memberId.trim() !== '';
+
+    if (hasName || hasMemberId) {
+      // Prefer the pre-resolved name, or look up by memberId
+      let memberName = roleData.name || '';
+      if (!memberName && hasMemberId && teamMembers?.length) {
+        const member = teamMembers.find(m => m.id === roleData.memberId);
+        memberName = member?.name || '';
+      }
+
+      // If we still don't have a name, use TBD
+      if (!memberName) {
+        memberName = 'TBD';
+      }
+
+      const fte = roleData.fte ? `${roleData.fte}%` : 'TBD';
+      const roleLabel = roleLabels[roleKey] || roleKey;
+
+      debugLogger.log('google', `Adding staff row for ${roleKey}`, {
+        roleLabel,
         memberName,
         fte,
-      ]);
+      });
+
+      staffData.push([roleLabel, memberName, fte]);
+    } else {
+      debugLogger.log('google', `Skipping role ${roleKey}: no name or memberId`);
     }
   }
+
+  debugLogger.log('google', 'Staff table data built - complete', {
+    rowCount: staffData.length,
+    staffData,
+  });
 
   return staffData;
 }
