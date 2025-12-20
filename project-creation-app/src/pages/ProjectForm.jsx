@@ -22,6 +22,8 @@ import {
   ExclamationTriangleIcon,
   PlusIcon,
   TrashIcon,
+  CheckCircleIcon,
+  ArrowPathIcon,
   DocumentDuplicateIcon,
   PaperAirplaneIcon,
   ClipboardDocumentListIcon,
