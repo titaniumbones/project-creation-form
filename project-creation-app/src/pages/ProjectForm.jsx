@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import HelpTooltip from '../components/ui/HelpTooltip';
+import ShareDraftModal from '../components/ui/ShareDraftModal';
 import { useTeamMembers } from '../hooks/useTeamMembers';
-import { getConnectionStatus } from '../services/oauth';
+import { getConnectionStatus, getCurrentUserEmail } from '../services/oauth';
 import * as airtable from '../services/airtable';
 import { airtableProjectFields, airtableTables } from '../services/airtable';
 import * as asana from '../services/asana';
 import * as google from '../services/google';
+import * as drafts from '../services/drafts';
 import { debugLogger } from '../services/debugLogger';
 import {
   ExclamationTriangleIcon,
@@ -17,6 +19,9 @@ import {
   CheckCircleIcon,
   ArrowPathIcon,
   ArrowTopRightOnSquareIcon,
+  DocumentDuplicateIcon,
+  PaperAirplaneIcon,
+  ClipboardDocumentListIcon,
 } from '@heroicons/react/24/outline';
 
 // Draft storage key
@@ -129,11 +134,20 @@ function FormField({ label, required, helpFile, error, children }) {
 
 export default function ProjectForm() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [currentSection, setCurrentSection] = useState('basics');
   const [submitError, setSubmitError] = useState(null);
 
   // Track which action is currently loading
   const [loadingAction, setLoadingAction] = useState(null);
+
+  // Draft management state
+  const [currentDraftId, setCurrentDraftId] = useState(null);
+  const [draftStatus, setDraftStatus] = useState(null);
+  const [draftShareToken, setDraftShareToken] = useState(null);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [isShareLoading, setIsShareLoading] = useState(false);
+  const [draftMessage, setDraftMessage] = useState(null);
 
   // Track created resources
   const [createdResources, setCreatedResources] = useState(() => {
@@ -573,11 +587,96 @@ export default function ProjectForm() {
     });
   };
 
+  // === DRAFT HANDLERS ===
+
+  // Save current form as draft
+  const handleSaveDraft = async () => {
+    setLoadingAction('saveDraft');
+    setDraftMessage(null);
+
+    try {
+      const userEmail = await getCurrentUserEmail();
+      if (!userEmail) {
+        throw new Error('Please connect to Airtable first to save drafts');
+      }
+
+      const formData = getFormData();
+
+      if (currentDraftId) {
+        // Update existing draft
+        await drafts.updateDraft(currentDraftId, formData);
+        setDraftMessage({ type: 'success', text: 'Draft updated successfully' });
+      } else {
+        // Create new draft
+        const result = await drafts.createDraft(formData, userEmail);
+        setCurrentDraftId(result.id);
+        setDraftShareToken(result.shareToken);
+        setDraftStatus('Draft');
+        setDraftMessage({ type: 'success', text: 'Draft saved successfully' });
+      }
+    } catch (err) {
+      setDraftMessage({ type: 'error', text: err.message });
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  // Submit draft for approval
+  const handleShareDraft = async ({ memberId, memberName, email }) => {
+    setIsShareLoading(true);
+    setDraftMessage(null);
+
+    try {
+      // Make sure we have a saved draft first
+      if (!currentDraftId) {
+        const userEmail = await getCurrentUserEmail();
+        if (!userEmail) {
+          throw new Error('Please connect to Airtable first');
+        }
+
+        const formData = getFormData();
+        const result = await drafts.createDraft(formData, userEmail);
+        setCurrentDraftId(result.id);
+        setDraftShareToken(result.shareToken);
+      }
+
+      // The email to send to - either custom or we need to get it
+      const approverEmail = email;
+      if (!approverEmail) {
+        throw new Error('Approver email is required');
+      }
+
+      await drafts.submitForApproval(currentDraftId, memberId, approverEmail);
+      setDraftStatus('Pending Approval');
+      setShareModalOpen(false);
+      setDraftMessage({
+        type: 'success',
+        text: `Draft sent to ${memberName || approverEmail} for approval`,
+      });
+    } catch (err) {
+      setDraftMessage({ type: 'error', text: err.message });
+    } finally {
+      setIsShareLoading(false);
+    }
+  };
+
+  // Copy share link to clipboard
+  const handleCopyShareLink = () => {
+    if (!draftShareToken) return;
+
+    const shareUrl = `${window.location.origin}/review/${draftShareToken}`;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setDraftMessage({ type: 'success', text: 'Link copied to clipboard' });
+      setTimeout(() => setDraftMessage(null), 3000);
+    });
+  };
+
   const sections = [
     { id: 'basics', label: 'Basics' },
     { id: 'description', label: 'Description' },
     { id: 'team', label: 'Team' },
     { id: 'outcomes', label: 'Outcomes' },
+    { id: 'drafts', label: 'Save & Share' },
     { id: 'actions', label: 'Actions' },
   ];
 
@@ -822,6 +921,95 @@ export default function ProjectForm() {
             </div>
           </FormSection>
 
+          {/* Draft Actions Section */}
+          <FormSection id="drafts" title="Save & Share">
+            {draftMessage && (
+              <div
+                className={`mb-4 p-3 rounded-lg ${
+                  draftMessage.type === 'success'
+                    ? 'bg-green-50 border border-green-200 text-green-700'
+                    : 'bg-red-50 border border-red-200 text-red-700'
+                }`}
+              >
+                {draftMessage.text}
+              </div>
+            )}
+
+            <div className="p-4 bg-blue-50 rounded-lg border border-blue-200 space-y-3">
+              <p className="text-sm text-blue-800">
+                Save your work as a draft and optionally share it with a lead for approval before creating resources.
+              </p>
+
+              {/* Draft Status Display */}
+              {draftStatus && (
+                <div className="flex items-center space-x-2 text-sm">
+                  <span className="text-gray-600">Status:</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                      draftStatus === 'Draft'
+                        ? 'bg-gray-200 text-gray-700'
+                        : draftStatus === 'Pending Approval'
+                        ? 'bg-yellow-200 text-yellow-800'
+                        : draftStatus === 'Approved'
+                        ? 'bg-green-200 text-green-800'
+                        : 'bg-orange-200 text-orange-800'
+                    }`}
+                  >
+                    {draftStatus}
+                  </span>
+                  {draftStatus === 'Approved' && (
+                    <span className="text-green-700 font-medium">Ready to create resources!</span>
+                  )}
+                </div>
+              )}
+
+              {/* Draft Action Buttons */}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleSaveDraft}
+                  disabled={loadingAction === 'saveDraft' || !connectionStatus.airtable}
+                  className="flex items-center space-x-2 px-4 py-2 bg-white border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+                >
+                  {loadingAction === 'saveDraft' ? (
+                    <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <DocumentDuplicateIcon className="w-4 h-4" />
+                  )}
+                  <span>{currentDraftId ? 'Update Draft' : 'Save as Draft'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShareModalOpen(true)}
+                  disabled={!connectionStatus.airtable}
+                  className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                >
+                  <PaperAirplaneIcon className="w-4 h-4" />
+                  <span>Share for Approval</span>
+                </button>
+
+                {draftShareToken && (
+                  <button
+                    type="button"
+                    onClick={handleCopyShareLink}
+                    className="flex items-center space-x-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    <ClipboardDocumentListIcon className="w-4 h-4" />
+                    <span>Copy Link</span>
+                  </button>
+                )}
+
+                <Link
+                  to="/drafts"
+                  className="flex items-center space-x-2 px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
+                >
+                  <span>View My Drafts</span>
+                </Link>
+              </div>
+            </div>
+          </FormSection>
+
           {/* Actions Section */}
           <FormSection id="actions" title="Create Resources">
             {submitError && (
@@ -947,6 +1135,15 @@ export default function ProjectForm() {
             </div>
           </FormSection>
         </form>
+
+        {/* Share Draft Modal */}
+        <ShareDraftModal
+          isOpen={shareModalOpen}
+          onClose={() => setShareModalOpen(false)}
+          onSubmit={handleShareDraft}
+          teamMembers={teamMembers}
+          isLoading={isShareLoading}
+        />
       </main>
     </div>
   );

@@ -21,6 +21,8 @@ export const airtableAssignmentFields = airtableConfig.assignment_fields || {};
 export const airtableTeamMembersFields = airtableConfig.team_members_fields || {};
 export const airtableProjectDefaults = airtableConfig.project_defaults || {};
 export const airtableRoleValues = airtableConfig.role_values || {};
+export const airtableDraftFields = airtableConfig.draft_fields || {};
+export const airtableDraftStatusValues = airtableConfig.draft_status_values || {};
 
 // Google configuration
 export const googleConfig = parsedConfig.google || {};

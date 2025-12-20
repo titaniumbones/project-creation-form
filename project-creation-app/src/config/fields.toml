@@ -178,6 +178,7 @@ projects = "Projects"
 milestones = "Milestones"
 assignments = "Assignments"
 team_members = "Data Team Members"
+drafts = "Project Drafts"
 
 [airtable.team_members_fields]
 # Fields to fetch from team members table
@@ -240,3 +241,28 @@ end_date = "{{END_DATE}}"
 project_owner = "{{PROJECT_OWNER}}"
 project_coordinator = "{{PROJECT_COORDINATOR}}"
 milestone_name = "{{MILESTONE_NAME}}"
+
+# =============================================================================
+# DRAFT / APPROVAL WORKFLOW
+# =============================================================================
+# Configure the "Project Drafts" table for save/share approval workflow
+
+[airtable.draft_fields]
+# Maps to Airtable Project Drafts table field names
+project_name = "Project Name"
+draft_data = "Draft Data"
+status = "Status"
+created_by = "Created By"
+created_at = "Created At"
+approver = "Approver"
+approver_email = "Approver Email"
+approver_notes = "Approver Notes"
+decision_at = "Decision At"
+share_token = "Share Token"
+
+[airtable.draft_status_values]
+# Maps status keys to Airtable dropdown values
+draft = "Draft"
+pending = "Pending Approval"
+approved = "Approved"
+changes_requested = "Changes Requested"

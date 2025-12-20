@@ -1,5 +1,6 @@
 // OAuth token management for all services
 const TOKEN_STORAGE_KEY = 'project_creator_tokens';
+const USER_INFO_KEY = 'project_creator_user';
 const OAUTH_RELAY_URL = import.meta.env.VITE_OAUTH_RELAY_URL || 'https://airtable-asana-integration-oauth.netlify.app';
 
 export const tokenManager = {
@@ -34,6 +35,7 @@ export const tokenManager = {
 
   clearAll() {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
+    localStorage.removeItem(USER_INFO_KEY);
   },
 
   isTokenValid(service) {
@@ -43,6 +45,77 @@ export const tokenManager = {
     return true;
   },
 };
+
+// User info management (for draft ownership)
+export const userManager = {
+  getUserInfo() {
+    try {
+      const stored = localStorage.getItem(USER_INFO_KEY);
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  },
+
+  setUserInfo(info) {
+    localStorage.setItem(USER_INFO_KEY, JSON.stringify(info));
+  },
+
+  clearUserInfo() {
+    localStorage.removeItem(USER_INFO_KEY);
+  },
+
+  getEmail() {
+    const info = this.getUserInfo();
+    return info?.email || null;
+  },
+};
+
+// Fetch current user info from Airtable
+async function fetchAirtableUserInfo(accessToken) {
+  try {
+    const response = await fetch('https://api.airtable.com/v0/meta/whoami', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      console.warn('Failed to fetch Airtable user info');
+      return null;
+    }
+
+    const data = await response.json();
+    return {
+      id: data.id,
+      email: data.email,
+    };
+  } catch (err) {
+    console.warn('Error fetching Airtable user info:', err);
+    return null;
+  }
+}
+
+// Get current user email (tries Airtable first, then cached)
+export async function getCurrentUserEmail() {
+  // Check cached user info first
+  const cached = userManager.getUserInfo();
+  if (cached?.email) {
+    return cached.email;
+  }
+
+  // Try to fetch from Airtable if connected
+  if (tokenManager.isTokenValid('airtable')) {
+    const token = tokenManager.getToken('airtable');
+    const userInfo = await fetchAirtableUserInfo(token.access_token);
+    if (userInfo?.email) {
+      userManager.setUserInfo(userInfo);
+      return userInfo.email;
+    }
+  }
+
+  return null;
+}
 
 // Get valid access token, refreshing if needed
 export async function getValidToken(service) {
@@ -124,6 +197,15 @@ export function startOAuthFlow(service) {
         refresh_token,
         expiresAt: Date.now() + (expires_in * 1000),
       });
+
+      // Fetch and cache user info after Airtable authentication
+      if (service === 'airtable') {
+        fetchAirtableUserInfo(access_token).then((userInfo) => {
+          if (userInfo) {
+            userManager.setUserInfo(userInfo);
+          }
+        });
+      }
 
       resolve({ access_token, refresh_token });
     };
