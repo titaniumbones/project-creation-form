@@ -595,9 +595,15 @@ export default function ProjectForm() {
     setDraftMessage(null);
 
     try {
-      const userEmail = await getCurrentUserEmail();
-      if (!userEmail) {
+      if (!connectionStatus.airtable) {
         throw new Error('Please connect to Airtable first to save drafts');
+      }
+
+      // Try to get user email, but don't require it
+      let userEmail = await getCurrentUserEmail();
+      if (!userEmail) {
+        // Fallback: use a placeholder - the user can still save drafts
+        userEmail = 'unknown@user';
       }
 
       const formData = getFormData();
