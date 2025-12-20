@@ -29,9 +29,9 @@ import {
   ClipboardDocumentListIcon,
 } from '@heroicons/react/24/outline';
 
-// Draft storage key
-const DRAFT_KEY = 'project_creator_draft';
-const CREATED_RESOURCES_KEY = 'project_creator_resources';
+// Local storage keys for form state persistence
+const DRAFT_KEY = 'project_creation_draft';
+const CREATED_RESOURCES_KEY = 'project_creation_resources';
 
 // Section progress indicator
 function ProgressIndicator({ sections, currentSection }) {
