@@ -1,5 +1,6 @@
 // Asana API client
 import { getValidToken } from './oauth';
+import { debugLogger } from './debugLogger';
 
 const API_URL = 'https://app.asana.com/api/1.0';
 
@@ -13,6 +14,10 @@ async function getAccessToken() {
 
 async function asanaRequest(endpoint, options = {}) {
   const token = await getAccessToken();
+  const method = options.method || 'GET';
+  const payload = options.body ? JSON.parse(options.body) : null;
+
+  debugLogger.logApiRequest('asana', endpoint, method, payload);
 
   const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,
@@ -25,10 +30,13 @@ async function asanaRequest(endpoint, options = {}) {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.errors?.[0]?.message || `Asana request failed: ${response.status}`);
+    const errorMsg = error.errors?.[0]?.message || `Asana request failed: ${response.status}`;
+    debugLogger.logApiResponse('asana', endpoint, error, new Error(errorMsg));
+    throw new Error(errorMsg);
   }
 
   const data = await response.json();
+  debugLogger.logApiResponse('asana', endpoint, data.data);
   return data.data;
 }
 
@@ -63,6 +71,13 @@ export async function createProjectFromTemplate(templateGid, name, teamGid, star
   // Get template to see what dates and roles are required
   const template = await getProjectTemplate(templateGid);
 
+  // Log template and provided role assignments for debugging
+  debugLogger.log('asana', 'Template roles from Asana', {
+    templateName: template.name,
+    templateRoles: template.requested_roles?.map(r => ({ gid: r.gid, name: r.name })) || [],
+    providedAssignments: roleAssignments,
+  });
+
   // Build requested_dates
   const today = new Date().toISOString().split('T')[0];
   const formattedStartDate = formatDateForAsana(startDate);
@@ -75,6 +90,8 @@ export async function createProjectFromTemplate(templateGid, name, teamGid, star
 
   // Build requested_roles by matching template roles to assignments
   const requestedRoles = [];
+  const roleMatchingResults = [];
+
   for (const templateRole of (template.requested_roles || [])) {
     const templateRoleName = templateRole.name?.toLowerCase() || '';
 
@@ -88,6 +105,15 @@ export async function createProjectFromTemplate(templateGid, name, teamGid, star
              (assignmentName.includes('lead') && templateRoleName.includes('lead'));
     });
 
+    // Track matching results for debugging
+    roleMatchingResults.push({
+      templateRole: templateRole.name,
+      templateRoleGid: templateRole.gid,
+      matchedTo: match?.roleName || null,
+      userGid: match?.userGid || null,
+      matched: !!match,
+    });
+
     if (match) {
       requestedRoles.push({
         gid: templateRole.gid,
@@ -95,6 +121,13 @@ export async function createProjectFromTemplate(templateGid, name, teamGid, star
       });
     }
   }
+
+  // Log role matching results
+  debugLogger.log('asana', 'Role matching results', {
+    matched: roleMatchingResults.filter(r => r.matched),
+    unmatched: roleMatchingResults.filter(r => !r.matched),
+    finalRequestedRoles: requestedRoles,
+  });
 
   const requestBody = {
     name: name,
@@ -110,6 +143,11 @@ export async function createProjectFromTemplate(templateGid, name, teamGid, star
     requestBody.requested_roles = requestedRoles;
   }
 
+  debugLogger.log('asana', 'Creating project from template', {
+    templateGid,
+    requestBody,
+  });
+
   const result = await asanaRequest(`/project_templates/${templateGid}/instantiateProject`, {
     method: 'POST',
     body: JSON.stringify({ data: requestBody }),
@@ -120,6 +158,7 @@ export async function createProjectFromTemplate(templateGid, name, teamGid, star
     throw new Error('Project creation did not return a project GID');
   }
 
+  debugLogger.log('asana', 'Project created successfully', { projectGid });
   return projectGid;
 }
 
@@ -219,6 +258,29 @@ export function getProjectUrl(projectGid) {
   return `https://app.asana.com/0/${projectGid}/list`;
 }
 
+// Search for existing project by name (for duplicate checking)
+export async function searchProjectByName(projectName, workspaceGid) {
+  debugLogger.log('asana', 'Searching for existing project', { projectName, workspaceGid });
+
+  const results = await asanaRequest(
+    `/workspaces/${workspaceGid}/typeahead?resource_type=project&query=${encodeURIComponent(projectName)}&opt_fields=name,permalink_url`
+  );
+
+  const exactMatch = (results || []).find(p =>
+    p.name.toLowerCase() === projectName.toLowerCase()
+  );
+
+  const result = {
+    exists: !!exactMatch,
+    existingProject: exactMatch || null,
+    url: exactMatch?.permalink_url || null,
+    searchResults: (results || []).slice(0, 5).map(p => ({ name: p.name, gid: p.gid })),
+  };
+
+  debugLogger.log('asana', 'Project search result', result);
+  return result;
+}
+
 export default {
   getCurrentUser,
   getWorkspaceUsers,
@@ -228,4 +290,5 @@ export default {
   createTask,
   findBestUserMatch,
   getProjectUrl,
+  searchProjectByName,
 };

@@ -9,6 +9,7 @@ import * as airtable from '../services/airtable';
 import { airtableProjectFields, airtableTables } from '../services/airtable';
 import * as asana from '../services/asana';
 import * as google from '../services/google';
+import { debugLogger } from '../services/debugLogger';
 import {
   ExclamationTriangleIcon,
   PlusIcon,
@@ -160,6 +161,25 @@ export default function ProjectForm() {
   const clearCreatedResources = () => {
     setCreatedResources({});
     localStorage.removeItem(CREATED_RESOURCES_KEY);
+  };
+
+  // Debug mode state
+  const [debugMode, setDebugMode] = useState(false);
+
+  // Toggle debug mode
+  const handleToggleDebug = () => {
+    if (!debugMode) {
+      debugLogger.start();
+      debugLogger.log('form', 'Debug session started - form data snapshot', getFormData());
+    } else {
+      debugLogger.stop();
+    }
+    setDebugMode(!debugMode);
+  };
+
+  // Download debug log
+  const handleDownloadDebugLog = () => {
+    debugLogger.downloadLogs();
   };
 
   const connectionStatus = getConnectionStatus();
@@ -352,11 +372,31 @@ export default function ProjectForm() {
     }
   };
 
+  // Helper function to transform form data with role names for Google templates
+  const transformDataWithRoleNames = (data) => {
+    const transformedData = { ...data, roles: {} };
+
+    for (const [roleKey, roleData] of Object.entries(data.roles || {})) {
+      if (roleData?.memberId) {
+        const member = teamMembers.find(m => m.id === roleData.memberId);
+        transformedData.roles[roleKey] = {
+          ...roleData,
+          name: member?.name || '',
+        };
+      }
+    }
+
+    debugLogger.logTransform('formRoles', 'googleRoles', data.roles, transformedData.roles);
+    return transformedData;
+  };
+
   // 3. Create Google Scoping Doc
   const handleCreateScopingDoc = async () => {
     const data = getFormData();
     setLoadingAction('scopingDoc');
     setSubmitError(null);
+
+    debugLogger.log('form', 'Creating scoping doc', { projectName: data.projectName });
 
     try {
       const sharedDriveId = import.meta.env.VITE_GOOGLE_SHARED_DRIVE_ID;
@@ -387,13 +427,15 @@ export default function ProjectForm() {
       const docName = `${data.projectName} - Scoping Document`;
       const doc = await google.copyTemplate(scopingDocTemplateId, folderId, docName);
 
-      // Populate placeholders
-      const replacements = google.buildReplacements(data);
+      // Transform data to include role names, then populate placeholders
+      const transformedData = transformDataWithRoleNames(data);
+      const replacements = google.buildReplacements(transformedData);
       await google.populateDoc(doc.id, replacements);
 
       const scopingDocUrl = google.getDocUrl(doc.id);
       updateCreatedResources({ googleFolderId: folderId, folderUrl, scopingDocId: doc.id, scopingDocUrl });
     } catch (err) {
+      debugLogger.logError('google', 'Failed to create scoping doc', err);
       setSubmitError(`Scoping Doc: ${err.message}`);
     } finally {
       setLoadingAction(null);
@@ -405,6 +447,8 @@ export default function ProjectForm() {
     const data = getFormData();
     setLoadingAction('kickoffDeck');
     setSubmitError(null);
+
+    debugLogger.log('form', 'Creating kickoff deck', { projectName: data.projectName });
 
     try {
       const kickoffDeckTemplateId = import.meta.env.VITE_GOOGLE_KICKOFF_DECK_TEMPLATE_ID;
@@ -435,13 +479,15 @@ export default function ProjectForm() {
       const deckName = `${data.projectName} - Kickoff Deck`;
       const deck = await google.copyTemplate(kickoffDeckTemplateId, folderId, deckName);
 
-      // Populate placeholders
-      const replacements = google.buildReplacements(data);
+      // Transform data to include role names, then populate placeholders
+      const transformedData = transformDataWithRoleNames(data);
+      const replacements = google.buildReplacements(transformedData);
       await google.populateSlides(deck.id, replacements);
 
       const kickoffDeckUrl = google.getSlidesUrl(deck.id);
       updateCreatedResources({ kickoffDeckId: deck.id, kickoffDeckUrl });
     } catch (err) {
+      debugLogger.logError('google', 'Failed to create kickoff deck', err);
       setSubmitError(`Kickoff Deck: ${err.message}`);
     } finally {
       setLoadingAction(null);
@@ -783,6 +829,35 @@ export default function ProjectForm() {
                 {submitError}
               </div>
             )}
+
+            {/* Debug Mode Toggle */}
+            <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={debugMode}
+                    onChange={handleToggleDebug}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm font-medium text-gray-700">Debug Mode</span>
+                </label>
+                {debugMode && (
+                  <span className="text-xs text-gray-500">
+                    ({debugLogger.getLogCount()} logs captured)
+                  </span>
+                )}
+              </div>
+              {debugMode && (
+                <button
+                  type="button"
+                  onClick={handleDownloadDebugLog}
+                  className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                >
+                  Download Debug Log
+                </button>
+              )}
+            </div>
 
             <p className="text-sm text-gray-600 mb-4">
               Create resources step by step. You can create them in any order, but Asana Milestones requires the Asana Board first, and Airtable will include URLs from other resources if created first.

@@ -1,5 +1,6 @@
 // Google Workspace API client (Drive, Docs, Slides)
 import { getValidToken } from './oauth';
+import { debugLogger } from './debugLogger';
 
 async function getAccessToken() {
   const token = await getValidToken('google');
@@ -80,6 +81,11 @@ export async function createDriveFolder(folderName, sharedDriveId = null, parent
 export async function copyTemplate(templateId, destinationFolderId, newName) {
   const token = await getAccessToken();
 
+  debugLogger.logApiRequest('google', `/drive/v3/files/${templateId}/copy`, 'POST', {
+    name: newName,
+    parents: [destinationFolderId],
+  });
+
   const response = await fetch(`https://www.googleapis.com/drive/v3/files/${templateId}/copy?supportsAllDrives=true`, {
     method: 'POST',
     headers: {
@@ -94,10 +100,13 @@ export async function copyTemplate(templateId, destinationFolderId, newName) {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
+    debugLogger.logApiResponse('google', `/drive/v3/files/${templateId}/copy`, error, new Error(error.error?.message || 'Failed to copy template'));
     throw new Error(error.error?.message || 'Failed to copy template');
   }
 
-  return response.json();
+  const result = await response.json();
+  debugLogger.logApiResponse('google', `/drive/v3/files/${templateId}/copy`, result);
+  return result;
 }
 
 // Populate a Google Doc with placeholder replacements
@@ -116,6 +125,13 @@ export async function populateDoc(documentId, replacements) {
 
   if (requests.length === 0) return;
 
+  debugLogger.logApiRequest('google', `/documents/${documentId}:batchUpdate`, 'POST', {
+    requestCount: requests.length,
+    replacements: Object.fromEntries(
+      Object.entries(replacements).map(([k, v]) => [k, v ? (v.length > 50 ? v.substring(0, 50) + '...' : v) : '(empty)'])
+    ),
+  });
+
   const response = await fetch(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
     method: 'POST',
     headers: {
@@ -127,10 +143,13 @@ export async function populateDoc(documentId, replacements) {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
+    debugLogger.logApiResponse('google', `/documents/${documentId}:batchUpdate`, error, new Error(error.error?.message || 'Failed to populate document'));
     throw new Error(error.error?.message || 'Failed to populate document');
   }
 
-  return response.json();
+  const result = await response.json();
+  debugLogger.logApiResponse('google', `/documents/${documentId}:batchUpdate`, result);
+  return result;
 }
 
 // Populate a Google Slides presentation with placeholder replacements
@@ -149,6 +168,13 @@ export async function populateSlides(presentationId, replacements) {
 
   if (requests.length === 0) return;
 
+  debugLogger.logApiRequest('google', `/presentations/${presentationId}:batchUpdate`, 'POST', {
+    requestCount: requests.length,
+    replacements: Object.fromEntries(
+      Object.entries(replacements).map(([k, v]) => [k, v ? (v.length > 50 ? v.substring(0, 50) + '...' : v) : '(empty)'])
+    ),
+  });
+
   const response = await fetch(`https://slides.googleapis.com/v1/presentations/${presentationId}:batchUpdate`, {
     method: 'POST',
     headers: {
@@ -160,10 +186,13 @@ export async function populateSlides(presentationId, replacements) {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
+    debugLogger.logApiResponse('google', `/presentations/${presentationId}:batchUpdate`, error, new Error(error.error?.message || 'Failed to populate slides'));
     throw new Error(error.error?.message || 'Failed to populate slides');
   }
 
-  return response.json();
+  const result = await response.json();
+  debugLogger.logApiResponse('google', `/presentations/${presentationId}:batchUpdate`, result);
+  return result;
 }
 
 // Get Google Doc URL from document ID
@@ -202,7 +231,19 @@ export function buildReplacements(projectData) {
     day: 'numeric',
   });
 
-  return {
+  // Log incoming data structure for debugging role name issues
+  debugLogger.log('google', 'Building replacements from project data', {
+    projectName: projectData.projectName,
+    projectAcronym: projectData.projectAcronym,
+    description: projectData.description ? `${projectData.description.substring(0, 50)}...` : null,
+    objectives: projectData.objectives ? `${projectData.objectives.substring(0, 50)}...` : null,
+    startDate: projectData.startDate,
+    endDate: projectData.endDate,
+    roles: projectData.roles,
+    rolesKeys: Object.keys(projectData.roles || {}),
+  });
+
+  const replacements = {
     '{{PROJECT_NAME}}': projectData.projectName || '',
     '{{PROJECT_ACRONYM}}': projectData.projectAcronym || '',
     '{{PROJECT_DESCRIPTION}}': projectData.description || '',
@@ -213,6 +254,16 @@ export function buildReplacements(projectData) {
     '{{PROJECT_OWNER}}': projectData.roles?.project_owner?.name || '',
     '{{PROJECT_COORDINATOR}}': projectData.roles?.project_coordinator?.name || '',
   };
+
+  // Log the actual replacements that will be made
+  debugLogger.log('google', 'Template replacements prepared', {
+    replacements,
+    emptyPlaceholders: Object.entries(replacements)
+      .filter(([_, value]) => !value)
+      .map(([key]) => key),
+  });
+
+  return replacements;
 }
 
 export default {

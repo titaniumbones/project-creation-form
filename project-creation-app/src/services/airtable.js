@@ -1,5 +1,6 @@
 // Airtable API client
 import { getValidToken } from './oauth';
+import { debugLogger } from './debugLogger';
 import {
   airtableTables,
   airtableProjectFields,
@@ -23,6 +24,10 @@ async function getAccessToken() {
 
 async function airtableRequest(endpoint, options = {}) {
   const token = await getAccessToken();
+  const method = options.method || 'GET';
+  const payload = options.body ? JSON.parse(options.body) : null;
+
+  debugLogger.logApiRequest('airtable', endpoint, method, payload);
 
   const response = await fetch(`${API_URL}/${BASE_ID}/${endpoint}`, {
     ...options,
@@ -35,10 +40,14 @@ async function airtableRequest(endpoint, options = {}) {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.error?.message || `Airtable request failed: ${response.status}`);
+    const errorMsg = error.error?.message || `Airtable request failed: ${response.status}`;
+    debugLogger.logApiResponse('airtable', endpoint, error, new Error(errorMsg));
+    throw new Error(errorMsg);
   }
 
-  return response.json();
+  const result = await response.json();
+  debugLogger.logApiResponse('airtable', endpoint, result);
+  return result;
 }
 
 // Get records from a table
@@ -90,19 +99,38 @@ export async function createProject(projectData) {
   const f = airtableProjectFields;
   const defaults = airtableProjectDefaults;
 
+  // Log incoming data and field mappings
+  debugLogger.logTransform('projectData', 'airtableFields', projectData, {
+    tableName,
+    fieldMappings: f,
+    defaults,
+  });
+
+  const fields = {
+    [f.name || 'Project']: projectData.name,
+    [f.acronym || 'Project Acronym']: projectData.acronym || '',
+    [f.description || 'Project Description']: projectData.description || '',
+    [f.objectives || 'Objectives']: projectData.objectives || '',
+    [f.start_date || 'Start Date']: projectData.startDate || null,
+    [f.end_date || 'End Date']: projectData.endDate || null,
+    [f.status || 'Status']: defaults.status || 'In Ideation',
+  };
+
+  // Log the exact fields being sent
+  debugLogger.log('airtable', 'Creating project with fields', {
+    tableName,
+    fields,
+    fieldDetails: Object.entries(fields).map(([key, value]) => ({
+      fieldName: key,
+      value: typeof value === 'string' && value.length > 100 ? value.substring(0, 100) + '...' : value,
+      valueType: typeof value,
+      valueLength: typeof value === 'string' ? value.length : null,
+    })),
+  });
+
   const data = await airtableRequest(encodeURIComponent(tableName), {
     method: 'POST',
-    body: JSON.stringify({
-      fields: {
-        [f.name || 'Project']: projectData.name,
-        [f.acronym || 'Project Acronym']: projectData.acronym || '',
-        [f.description || 'Project Description']: projectData.description || '',
-        [f.objectives || 'Objectives']: projectData.objectives || '',
-        [f.start_date || 'Start Date']: projectData.startDate || null,
-        [f.end_date || 'End Date']: projectData.endDate || null,
-        [f.status || 'Status']: defaults.status || 'In Ideation',
-      },
-    }),
+    body: JSON.stringify({ fields }),
   });
 
   return data;
@@ -210,6 +238,28 @@ export async function updateRecord(tableName, recordId, fields) {
   return data;
 }
 
+// Check if a project with this name already exists
+export async function checkProjectExists(projectName) {
+  const tableName = airtableTables.projects || 'Projects';
+  const nameField = airtableProjectFields.name || 'Project';
+
+  debugLogger.log('airtable', 'Checking for existing project', { projectName });
+
+  const records = await getRecords(tableName, {
+    filterByFormula: `{${nameField}} = "${projectName.replace(/"/g, '\\"')}"`,
+    maxRecords: 1,
+  });
+
+  const result = {
+    exists: records.length > 0,
+    existingRecord: records[0] || null,
+    url: records[0] ? `https://airtable.com/${BASE_ID}/${records[0].id}` : null,
+  };
+
+  debugLogger.log('airtable', 'Duplicate check result', result);
+  return result;
+}
+
 // Export config for use in other modules
 export { airtableProjectFields, airtableTables };
 
@@ -220,4 +270,5 @@ export default {
   createMilestones,
   createAssignments,
   updateRecord,
+  checkProjectExists,
 };
