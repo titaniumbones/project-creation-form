@@ -2,102 +2,26 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useForm, useFieldArray } from 'react-hook-form';
 import Header from '../components/layout/Header';
-import HelpTooltip from '../components/ui/HelpTooltip';
+import {
+  FormSection,
+  FormField,
+  RoleAssignmentSection,
+  OutcomesSection,
+  DEFAULT_FORM_VALUES,
+} from '../components/form/FormComponents';
 import { useTeamMembers } from '../hooks/useTeamMembers';
 import { getConnectionStatus } from '../services/oauth';
 import * as drafts from '../services/drafts';
 import * as airtable from '../services/airtable';
-import { airtableProjectFields, airtableTables } from '../services/airtable';
 import * as asana from '../services/asana';
 import * as google from '../services/google';
-import { debugLogger } from '../services/debugLogger';
 import {
-  ExclamationTriangleIcon,
-  PlusIcon,
-  TrashIcon,
   CheckCircleIcon,
   ArrowPathIcon,
   ArrowTopRightOnSquareIcon,
   XCircleIcon,
   ChatBubbleLeftIcon,
 } from '@heroicons/react/24/outline';
-
-// Form field wrapper
-function FormField({ label, required, helpFile, error, children }) {
-  return (
-    <div className="mb-4">
-      <div className="flex items-center justify-between mb-1">
-        <label className="form-label">
-          {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-        {helpFile && <HelpTooltip helpFile={helpFile} />}
-      </div>
-      {children}
-      {error && (
-        <p className="mt-1 text-sm text-red-600">{error.message}</p>
-      )}
-    </div>
-  );
-}
-
-// Form section wrapper
-function FormSection({ id, title, children }) {
-  return (
-    <section id={id} className="form-section scroll-mt-24">
-      <h2 className="form-section-title mb-4">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-// Action button component for individual steps
-function ActionButton({ label, onClick, isLoading, isComplete, url, disabled }) {
-  return (
-    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
-      <div className="flex items-center space-x-3">
-        {isComplete ? (
-          <CheckCircleIcon className="w-5 h-5 text-green-500" />
-        ) : (
-          <div className="w-5 h-5 rounded-full border-2 border-gray-300" />
-        )}
-        <span className={`font-medium ${isComplete ? 'text-green-700' : 'text-gray-700'}`}>
-          {label}
-        </span>
-      </div>
-      <div className="flex items-center space-x-2">
-        {url && (
-          <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 hover:text-blue-800"
-          >
-            <ArrowTopRightOnSquareIcon className="w-5 h-5" />
-          </a>
-        )}
-        <button
-          type="button"
-          onClick={onClick}
-          disabled={disabled || isLoading}
-          className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-            isComplete
-              ? 'bg-green-100 text-green-700 hover:bg-green-200'
-              : 'bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed'
-          }`}
-        >
-          {isLoading ? (
-            <ArrowPathIcon className="w-4 h-4 animate-spin" />
-          ) : isComplete ? (
-            'Recreate'
-          ) : (
-            'Create'
-          )}
-        </button>
-      </div>
-    </div>
-  );
-}
 
 export default function ReviewDraft() {
   const { token } = useParams();
@@ -106,12 +30,12 @@ export default function ReviewDraft() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [draft, setDraft] = useState(null);
-  const [isEditing, setIsEditing] = useState(false);
   const [actionMessage, setActionMessage] = useState(null);
   const [loadingAction, setLoadingAction] = useState(null);
   const [showNotesModal, setShowNotesModal] = useState(false);
   const [notes, setNotes] = useState('');
   const [createdResources, setCreatedResources] = useState({});
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   const connectionStatus = getConnectionStatus();
   const { data: teamMembers = [], isLoading: loadingMembers } = useTeamMembers();
@@ -124,23 +48,7 @@ export default function ReviewDraft() {
     setValue,
     formState: { errors },
   } = useForm({
-    defaultValues: {
-      projectName: '',
-      projectAcronym: '',
-      startDate: '',
-      endDate: '',
-      description: '',
-      objectives: '',
-      roles: {
-        project_owner: { memberId: '', fte: '' },
-        project_coordinator: { memberId: '', fte: '' },
-        technical_support: { memberId: '', fte: '' },
-        comms_support: { memberId: '', fte: '' },
-        oversight: { memberId: '', fte: '' },
-        other: { memberId: '', fte: '' },
-      },
-      outcomes: [{ name: '', description: '', dueDate: '' }],
-    },
+    defaultValues: DEFAULT_FORM_VALUES,
   });
 
   const { fields: outcomeFields, append: addOutcome, remove: removeOutcome } = useFieldArray({
@@ -149,6 +57,13 @@ export default function ReviewDraft() {
   });
 
   const watchedValues = watch();
+
+  // Track form changes
+  useEffect(() => {
+    if (draft) {
+      setHasUnsavedChanges(true);
+    }
+  }, [JSON.stringify(watchedValues)]);
 
   // Load draft on mount
   useEffect(() => {
@@ -178,18 +93,26 @@ export default function ReviewDraft() {
   // Get current form data
   const getFormData = () => watchedValues;
 
-  // Update draft with current form data
-  const handleSaveChanges = async () => {
-    setLoadingAction('save');
+  // Save current form changes to draft
+  const saveFormChanges = async () => {
     try {
       await drafts.updateDraftFormData(draft.id, getFormData());
-      setActionMessage({ type: 'success', text: 'Changes saved' });
-      setIsEditing(false);
+      setHasUnsavedChanges(false);
+      return true;
     } catch (err) {
-      setActionMessage({ type: 'error', text: err.message });
-    } finally {
-      setLoadingAction(null);
+      setActionMessage({ type: 'error', text: `Failed to save changes: ${err.message}` });
+      return false;
     }
+  };
+
+  // Manual save button handler
+  const handleSaveChanges = async () => {
+    setLoadingAction('save');
+    const success = await saveFormChanges();
+    if (success) {
+      setActionMessage({ type: 'success', text: 'Changes saved' });
+    }
+    setLoadingAction(null);
   };
 
   // Helper function to transform form data with role names for Google templates
@@ -215,7 +138,10 @@ export default function ReviewDraft() {
     setActionMessage(null);
 
     try {
-      // Mark as approved first
+      // Save any form changes first
+      await saveFormChanges();
+
+      // Mark as approved
       await drafts.approveDraft(draft.id, 'Approved and resources created by reviewer');
 
       const data = getFormData();
@@ -353,6 +279,9 @@ export default function ReviewDraft() {
   const handleApproveAndReturn = async () => {
     setLoadingAction('approveReturn');
     try {
+      // Save any form changes first
+      await saveFormChanges();
+
       await drafts.approveDraft(draft.id, 'Approved by reviewer - coordinator to create resources');
       setActionMessage({
         type: 'success',
@@ -366,19 +295,22 @@ export default function ReviewDraft() {
     }
   };
 
-  // Request changes
-  const handleRequestChanges = async () => {
+  // Request further review - save changes and send back to coordinator
+  const handleRequestFurtherReview = async () => {
     if (!notes.trim()) {
       setActionMessage({ type: 'error', text: 'Please provide feedback notes' });
       return;
     }
 
-    setLoadingAction('requestChanges');
+    setLoadingAction('requestReview');
     try {
+      // Save any form changes first
+      await saveFormChanges();
+
       await drafts.requestChanges(draft.id, notes);
       setActionMessage({
         type: 'success',
-        text: 'Changes requested. The coordinator has been notified.',
+        text: 'Feedback sent. The coordinator has been notified to review your changes.',
       });
       setDraft(prev => ({ ...prev, status: 'Changes Requested' }));
       setShowNotesModal(false);
@@ -466,14 +398,8 @@ export default function ReviewDraft() {
                 </span>
               </p>
             </div>
-            {!isAlreadyProcessed && (
-              <button
-                type="button"
-                onClick={() => setIsEditing(!isEditing)}
-                className="text-sm text-blue-600 hover:text-blue-800"
-              >
-                {isEditing ? 'Cancel Editing' : 'Edit Draft'}
-              </button>
+            {hasUnsavedChanges && !isAlreadyProcessed && (
+              <span className="text-sm text-orange-600">Unsaved changes</span>
             )}
           </div>
         </div>
@@ -506,7 +432,7 @@ export default function ReviewDraft() {
                 <input
                   type="text"
                   className="form-input"
-                  disabled={!isEditing}
+                  disabled={isAlreadyProcessed}
                   {...register('projectName')}
                 />
               </FormField>
@@ -515,7 +441,7 @@ export default function ReviewDraft() {
                 <input
                   type="text"
                   className="form-input"
-                  disabled={!isEditing}
+                  disabled={isAlreadyProcessed}
                   {...register('projectAcronym')}
                 />
               </FormField>
@@ -526,7 +452,7 @@ export default function ReviewDraft() {
                 <input
                   type="date"
                   className="form-input"
-                  disabled={!isEditing}
+                  disabled={isAlreadyProcessed}
                   {...register('startDate')}
                 />
               </FormField>
@@ -535,7 +461,7 @@ export default function ReviewDraft() {
                 <input
                   type="date"
                   className="form-input"
-                  disabled={!isEditing}
+                  disabled={isAlreadyProcessed}
                   {...register('endDate')}
                 />
               </FormField>
@@ -547,7 +473,7 @@ export default function ReviewDraft() {
             <FormField label="Description" required error={errors.description}>
               <textarea
                 className="form-input min-h-[200px]"
-                disabled={!isEditing}
+                disabled={isAlreadyProcessed}
                 {...register('description')}
               />
             </FormField>
@@ -555,7 +481,7 @@ export default function ReviewDraft() {
             <FormField label="Objectives" required error={errors.objectives}>
               <textarea
                 className="form-input min-h-[150px]"
-                disabled={!isEditing}
+                disabled={isAlreadyProcessed}
                 {...register('objectives')}
               />
             </FormField>
@@ -566,119 +492,34 @@ export default function ReviewDraft() {
             {loadingMembers ? (
               <div className="py-8 text-center text-gray-500">Loading team members...</div>
             ) : (
-              <div className="space-y-4">
-                {[
-                  { key: 'project_owner', label: 'Project Owner', required: true },
-                  { key: 'project_coordinator', label: 'Project Coordinator', required: true },
-                  { key: 'technical_support', label: 'Technical Support' },
-                  { key: 'comms_support', label: 'Communications Support' },
-                  { key: 'oversight', label: 'Oversight' },
-                  { key: 'other', label: 'Other' },
-                ].map((role) => (
-                  <FormField
-                    key={role.key}
-                    label={role.label}
-                    required={role.required}
-                    error={errors.roles?.[role.key]?.memberId}
-                  >
-                    <div className="flex gap-3">
-                      <select
-                        className="form-input flex-1"
-                        disabled={!isEditing}
-                        {...register(`roles.${role.key}.memberId`)}
-                      >
-                        <option value="">Select team member...</option>
-                        {teamMembers.map((member) => (
-                          <option key={member.id} value={member.id}>
-                            {member.name}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="number"
-                        className="form-input w-24"
-                        placeholder="% FTE"
-                        disabled={!isEditing}
-                        {...register(`roles.${role.key}.fte`)}
-                      />
-                    </div>
-                  </FormField>
-                ))}
-              </div>
+              <RoleAssignmentSection
+                register={register}
+                errors={errors}
+                teamMembers={teamMembers}
+                disabled={isAlreadyProcessed}
+              />
             )}
           </FormSection>
 
           {/* Outcomes Section */}
           <FormSection id="outcomes" title="Outcomes & Milestones">
-            <div className="space-y-4">
-              {outcomeFields.map((field, index) => (
-                <div
-                  key={field.id}
-                  className="p-4 bg-gray-50 rounded-lg border border-gray-200"
-                >
-                  <div className="flex justify-between items-start mb-3">
-                    <span className="text-sm font-medium text-gray-500">
-                      Outcome {index + 1}
-                    </span>
-                    {isEditing && outcomeFields.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeOutcome(index)}
-                        className="text-red-500 hover:text-red-700"
-                      >
-                        <TrashIcon className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="space-y-3">
-                    <input
-                      type="text"
-                      className="form-input"
-                      placeholder="Outcome name"
-                      disabled={!isEditing}
-                      {...register(`outcomes.${index}.name`)}
-                    />
-
-                    <textarea
-                      className="form-input"
-                      placeholder="Brief description (optional)"
-                      rows={2}
-                      disabled={!isEditing}
-                      {...register(`outcomes.${index}.description`)}
-                    />
-
-                    <input
-                      type="date"
-                      className="form-input"
-                      disabled={!isEditing}
-                      {...register(`outcomes.${index}.dueDate`)}
-                    />
-                  </div>
-                </div>
-              ))}
-
-              {isEditing && (
-                <button
-                  type="button"
-                  onClick={() => addOutcome({ name: '', description: '', dueDate: '' })}
-                  className="btn-secondary w-full flex items-center justify-center space-x-2"
-                >
-                  <PlusIcon className="w-4 h-4" />
-                  <span>Add Outcome</span>
-                </button>
-              )}
-            </div>
+            <OutcomesSection
+              fields={outcomeFields}
+              register={register}
+              append={addOutcome}
+              remove={removeOutcome}
+              disabled={isAlreadyProcessed}
+            />
           </FormSection>
 
-          {/* Save Changes Button (when editing) */}
-          {isEditing && (
+          {/* Save Changes Button */}
+          {!isAlreadyProcessed && hasUnsavedChanges && (
             <div className="mt-6">
               <button
                 type="button"
                 onClick={handleSaveChanges}
                 disabled={loadingAction === 'save'}
-                className="btn-primary w-full"
+                className="btn-secondary w-full"
               >
                 {loadingAction === 'save' ? 'Saving...' : 'Save Changes'}
               </button>
@@ -727,7 +568,7 @@ export default function ReviewDraft() {
                 className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
               >
                 <ChatBubbleLeftIcon className="w-5 h-5" />
-                <span>Request Changes</span>
+                <span>Request Further Review</span>
               </button>
             </div>
           </div>
@@ -801,14 +642,14 @@ export default function ReviewDraft() {
         {showNotesModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Request Changes</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Request Further Review</h3>
               <p className="text-sm text-gray-600 mb-4">
-                Provide feedback on what changes are needed. This will be sent to the coordinator.
+                Your changes will be saved. Add notes explaining what still needs attention or why you're sending it back.
               </p>
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Enter your feedback..."
+                placeholder="Enter your notes..."
                 className="form-input min-h-[150px] mb-4"
               />
               <div className="flex gap-3">
@@ -824,11 +665,11 @@ export default function ReviewDraft() {
                 </button>
                 <button
                   type="button"
-                  onClick={handleRequestChanges}
-                  disabled={loadingAction === 'requestChanges' || !notes.trim()}
+                  onClick={handleRequestFurtherReview}
+                  disabled={loadingAction === 'requestReview' || !notes.trim()}
                   className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:bg-gray-300"
                 >
-                  {loadingAction === 'requestChanges' ? 'Sending...' : 'Submit Feedback'}
+                  {loadingAction === 'requestReview' ? 'Sending...' : 'Send for Review'}
                 </button>
               </div>
             </div>

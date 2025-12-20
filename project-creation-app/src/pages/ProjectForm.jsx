@@ -2,8 +2,14 @@ import { useState, useEffect } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Header from '../components/layout/Header';
-import HelpTooltip from '../components/ui/HelpTooltip';
 import ShareDraftModal from '../components/ui/ShareDraftModal';
+import {
+  FormSection,
+  FormField,
+  ActionButton,
+  ROLE_TYPES,
+  DEFAULT_FORM_VALUES,
+} from '../components/form/FormComponents';
 import { useTeamMembers } from '../hooks/useTeamMembers';
 import { getConnectionStatus, userManager } from '../services/oauth';
 import * as airtable from '../services/airtable';
@@ -16,9 +22,6 @@ import {
   ExclamationTriangleIcon,
   PlusIcon,
   TrashIcon,
-  CheckCircleIcon,
-  ArrowPathIcon,
-  ArrowTopRightOnSquareIcon,
   DocumentDuplicateIcon,
   PaperAirplaneIcon,
   ClipboardDocumentListIcon,
@@ -27,55 +30,6 @@ import {
 // Draft storage key
 const DRAFT_KEY = 'project_creator_draft';
 const CREATED_RESOURCES_KEY = 'project_creator_resources';
-
-// Action button component for individual steps
-function ActionButton({ label, onClick, isLoading, isComplete, url, disabled, error }) {
-  return (
-    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
-      <div className="flex items-center space-x-3">
-        {isComplete ? (
-          <CheckCircleIcon className="w-5 h-5 text-green-500" />
-        ) : (
-          <div className="w-5 h-5 rounded-full border-2 border-gray-300" />
-        )}
-        <span className={`font-medium ${isComplete ? 'text-green-700' : 'text-gray-700'}`}>
-          {label}
-        </span>
-      </div>
-      <div className="flex items-center space-x-2">
-        {url && (
-          <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 hover:text-blue-800"
-          >
-            <ArrowTopRightOnSquareIcon className="w-5 h-5" />
-          </a>
-        )}
-        <button
-          type="button"
-          onClick={onClick}
-          disabled={disabled || isLoading}
-          className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-            isComplete
-              ? 'bg-green-100 text-green-700 hover:bg-green-200'
-              : 'bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed'
-          }`}
-        >
-          {isLoading ? (
-            <ArrowPathIcon className="w-4 h-4 animate-spin" />
-          ) : isComplete ? (
-            'Recreate'
-          ) : (
-            'Create'
-          )}
-        </button>
-      </div>
-      {error && <p className="text-sm text-red-600 mt-1">{error}</p>}
-    </div>
-  );
-}
 
 // Section progress indicator
 function ProgressIndicator({ sections, currentSection }) {
@@ -96,38 +50,6 @@ function ProgressIndicator({ sections, currentSection }) {
           </a>
         ))}
       </nav>
-    </div>
-  );
-}
-
-// Form section wrapper
-function FormSection({ id, title, children, helpFile }) {
-  return (
-    <section id={id} className="form-section scroll-mt-24">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="form-section-title">{title}</h2>
-        {helpFile && <HelpTooltip helpFile={helpFile} />}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-// Form field wrapper
-function FormField({ label, required, helpFile, error, children }) {
-  return (
-    <div className="mb-4">
-      <div className="flex items-center justify-between mb-1">
-        <label className="form-label">
-          {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-        {helpFile && <HelpTooltip helpFile={helpFile} />}
-      </div>
-      {children}
-      {error && (
-        <p className="mt-1 text-sm text-red-600">{error.message}</p>
-      )}
     </div>
   );
 }
@@ -815,14 +737,7 @@ export default function ProjectForm() {
               </div>
             ) : (
               <div className="space-y-4">
-                {[
-                  { key: 'project_owner', label: 'Project Owner', required: true },
-                  { key: 'project_coordinator', label: 'Project Coordinator', required: true },
-                  { key: 'technical_support', label: 'Technical Support' },
-                  { key: 'comms_support', label: 'Communications Support' },
-                  { key: 'oversight', label: 'Oversight' },
-                  { key: 'other', label: 'Other' },
-                ].map((role) => (
+                {ROLE_TYPES.map((role) => (
                   <FormField
                     key={role.key}
                     label={role.label}
