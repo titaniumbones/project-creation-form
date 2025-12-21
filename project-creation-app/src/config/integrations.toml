@@ -14,8 +14,18 @@ team_members_table = "Data Team Members"
 
 [asana]
 team_gid_env = "VITE_ASANA_TEAM_GID"
-template_project_gid = "1209652649504377"
 workspace_gid = "1206584297698339"
+
+# Default template for unspecified project types
+default_template_gid = "1209652649504377"
+
+# Template mappings by project type (keys must match Project Type options exactly)
+# Only include project types that have DIFFERENT templates from the default
+# Any project type not listed here falls back to default_template_gid
+[asana.templates]
+# Example: Report and Convening have specific templates
+# Report = "REPORT_TEMPLATE_GID_HERE"
+# Convening = "CONVENING_TEMPLATE_GID_HERE"
 
 [google]
 # Template document/presentation IDs

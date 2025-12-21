@@ -29,14 +29,31 @@ It should be relatively easy to add this to our project.
 
 Other products in our portfolio all use Typescript. this project should also be ocnverted to Typescript.  
 
+## Add New fields
+
+**STATUS: Complete**
+
+Airtable contains the following fields that we do not yet use:
+
+- Funder: choose from a list of possible funders
+- Parent Initiative: If this project is part of a larger initiative, indicate so here.  This helps us to bundle projects & is a prerequisite for identifying asana templates
+- Project Type: Also useful for choosing asana templates, and may eventually require slight differneces i nthe form (not yet though)
+
+We need those fields in order to implement the next step, below. 
+
 
 ## Use different asana templates for distinct project types
 
-Several project types have well-developed Asana templates with additional project roles. We should:
+**STATUS: Complete**
 
-1. ensure that there is some minimal consistency across these distinct templates
-2. establish logic within the app that assigns the appropriate template
-3. ensure that the template choices are part of config.toml, so that semi-technical staff can update them during development
+Several project types have well-developed Asana templates with additional project roles. Implementation:
+
+1. Template mappings are configured in `src/config/integrations.toml` under `[asana.templates]`
+2. Logic in `src/utils/asanaTemplates.ts` selects the appropriate template based on Project Type
+3. Any project type without a specific template mapping falls back to `default_template_gid`
+4. Template GIDs are configurable in the TOML config file for semi-technical staff to update
+
+
 
 ## Add Auth0 Authentication
 

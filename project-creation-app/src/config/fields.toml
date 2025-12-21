@@ -52,6 +52,30 @@ airtable_field = "End Date"
 asana_field = "due_on"
 google_placeholder = "{{END_DATE}}"
 
+[fields.funder]
+type = "linked_record"
+label = "Funder"
+required = false
+section = "basics"
+airtable_field = "Funder"
+source_table = "Funders"
+
+[fields.parent_initiative]
+type = "linked_record"
+label = "Parent Initiative"
+required = false
+section = "basics"
+airtable_field = "Parent Initiative"
+source_table = "Parent Initiatives"
+
+[fields.project_type]
+type = "select"
+label = "Project Type"
+required = false
+section = "basics"
+airtable_field = "Project Type"
+options = ["Project", "Report", "Convening", "Standard Project"]
+
 # =============================================================================
 # DESCRIPTION FIELDS
 # =============================================================================
@@ -179,10 +203,20 @@ milestones = "Milestones"
 assignments = "Assignments"
 team_members = "Data Team Members"
 drafts = "Project Drafts"
+funders = "Funders"
+parent_initiatives = "Parent Initiatives"
 
 [airtable.team_members_fields]
 # Fields to fetch from team members table
 name = "Full Name"
+
+[airtable.funder_fields]
+# Fields to fetch from funders table
+name = "Funder Name"
+
+[airtable.parent_initiative_fields]
+# Fields to fetch from parent initiatives table
+name = "Name"
 
 [airtable.project_fields]
 # Maps form data keys to Airtable Projects table field names
@@ -197,7 +231,10 @@ status = "Status"
 asana_url = "Asana Board"
 scoping_doc_url = "Project Scope"
 folder_url = "Project Folder"
-
+# New linked/select fields
+funder = "Funder"
+parent_initiative = "Parent Initiative"
+project_type = "Project Type"
 
 [airtable.project_defaults]
 # Default values for new projects

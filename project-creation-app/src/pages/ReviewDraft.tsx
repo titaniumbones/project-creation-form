@@ -10,6 +10,8 @@ import {
   DEFAULT_FORM_VALUES,
 } from '../components/form/FormComponents';
 import { useTeamMembers } from '../hooks/useTeamMembers';
+import { useIntegrationsConfig } from '../hooks/useConfig';
+import { getTemplateGidForProjectType } from '../utils/asanaTemplates';
 import { getConnectionStatus } from '../services/oauth';
 import * as drafts from '../services/drafts';
 import * as airtable from '../services/airtable';
@@ -47,6 +49,7 @@ export default function ReviewDraft() {
 
   const connectionStatus: ConnectionStatus = getConnectionStatus();
   const { data: teamMembers = [], isLoading: loadingMembers } = useTeamMembers();
+  const { config: integrationsConfig } = useIntegrationsConfig();
 
   // Form setup
   const {
@@ -158,8 +161,15 @@ export default function ReviewDraft() {
       const data = getFormData();
 
       // Create Asana board
-      const asanaTemplateGid = import.meta.env.VITE_ASANA_TEMPLATE_GID;
       const asanaTeamGid = import.meta.env.VITE_ASANA_TEAM_GID;
+      const asanaTemplateGid = getTemplateGidForProjectType(
+        data.projectType,
+        {
+          defaultTemplateGid: integrationsConfig?.asana?.default_template_gid ||
+            import.meta.env.VITE_ASANA_TEMPLATE_GID || '',
+          templates: integrationsConfig?.asana?.templates || {},
+        }
+      );
 
       if (asanaTemplateGid && asanaTeamGid && connectionStatus.asana) {
         const user = await asana.getCurrentUser();

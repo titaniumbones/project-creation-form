@@ -16,8 +16,9 @@ interface ConfigHookResult<T> {
 interface IntegrationsConfig {
   asana?: {
     workspace_gid?: string;
-    template_gid?: string;
-    team_gid?: string;
+    team_gid_env?: string;
+    default_template_gid?: string;
+    templates?: Record<string, string>;  // projectType -> templateGid
   };
   google?: {
     shared_drive_id?: string;
