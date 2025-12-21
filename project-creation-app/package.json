@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "netlify deploy --prod",
+    "deploy:preview": "netlify deploy",
+    "env:sync": "./scripts/sync-env-to-netlify.sh",
+    "env:sync:execute": "./scripts/sync-env-to-netlify.sh --execute"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.9",
