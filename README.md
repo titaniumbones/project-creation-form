@@ -1,109 +1,160 @@
-# Project Creation Form
+# Project Creation Helper
 
-An Airtable-native workflow for initiating new GivingTuesday projects. When a project intake form is submitted, this system generates a Scope of Work document with Asana setup guidance.
+A tool for streamlining GivingTuesday project creation across Airtable, Asana, and Google Workspace. Fill out one form to create project records, task boards, and scoping documents automatically.
+
+## Overview
+
+The Project Creation Helper allows project coordinators to:
+- Create project records in Airtable with milestones and team assignments
+- Generate Asana boards from templates with milestone tasks
+- Create Google Drive folders with scoping documents and kickoff decks
+- Save drafts and share them for approval before creating resources
+
+## Repository Structure
+
+```
+project-creation-form/
+├── project-creation-app/      # React web application (ACTIVE)
+├── asana-oauth-relay/         # OAuth token relay service (Netlify Functions)
+├── airtable-extension/        # Airtable custom extension (LEGACY)
+├── airtable/                   # Automation scripts (LEGACY)
+├── docs/                       # Architecture decision records
+│   └── architecture/
+│       ├── ADR-001-oauth-migration.md
+│       ├── ADR-003-standalone-web-app.md
+│       └── ADR-004-draft-approval-workflow.md
+├── templates/                  # Document templates
+├── SETUP.md                    # Local development guide
+└── README.md                   # This file
+```
+
+## Components
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| **project-creation-app** | Active | Modern React + Vite web application with OAuth integration |
+| **asana-oauth-relay** | Active | Netlify Functions handling OAuth flows for all services |
+| **airtable-extension** | Legacy | Original Airtable Block UI (still functional) |
+| **airtable/** | Legacy | Automation scripts for Airtable-only workflow |
 
 ## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
-│  Airtable Form  │────▶│  Generate SOW        │────▶│  User Creates   │
-│  (Project Info) │     │  + Setup Guidance    │     │  Asana Board    │
-└─────────────────┘     └──────────────────────┘     └─────────────────┘
-                                                              │
-                        ┌──────────────────────┐              │
-                        │  Record Complete     │◀─────────────┘
-                        │  (Asana linked)      │
-                        └──────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    Web Application                           │
+│           (React + Vite, Tailwind CSS)                       │
+│                                                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │ Project  │  │  Drafts  │  │ Settings │  │  Review  │   │
+│  │   Form   │  │   List   │  │   Page   │  │   Page   │   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│              OAuth Relay (Netlify Functions)                 │
+│                                                              │
+│   Handles OAuth 2.0 flows for Airtable, Asana, and Google   │
+│   Keeps client secrets server-side for security             │
+└─────────────────────────────────────────────────────────────┘
+                              │
+          ┌───────────────────┼───────────────────┐
+          ▼                   ▼                   ▼
+   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+   │  Airtable   │    │    Asana    │    │   Google    │
+   │             │    │             │    │  Workspace  │
+   │ - Projects  │    │ - Boards    │    │ - Drive     │
+   │ - Milestones│    │ - Tasks     │    │ - Docs      │
+   │ - Team      │    │             │    │ - Slides    │
+   │ - Drafts    │    │             │    │             │
+   └─────────────┘    └─────────────┘    └─────────────┘
 ```
 
-## All Fields Already Exist
+## Getting Started
 
-No schema changes needed. The required fields are in place:
+**For local development setup**, see [SETUP.md](SETUP.md).
 
-**Projects:** Project, Project Acronym, Project Description, Start Date, End Date, Status, Asana Board, Scope of Work - Generated, Milestones (link), Milestone Rollup, Roles Summary
+### Quick Start
 
-**Milestones:** Milestone, Project, Due Date, Description, Status
+```bash
+# Clone and enter project
+git clone https://github.com/YOUR_ORG/project-creation-form.git
+cd project-creation-form/project-creation-app
 
-**Assignments:** Role Display (formula)
+# Install dependencies
+npm install
 
-## Setup Instructions
+# Configure environment
+cp .env.example .env
+# Edit .env with your values
 
-### Step 1: Create the Form
-
-1. Go to Projects table → Create form
-2. Include: Project, Project Acronym, Project Description, Start Date, End Date
-3. Do NOT include: Status, Milestones, Asana Board, Scope of Work - Generated
-
-### Step 2: Create Automation
-
-1. **Trigger**: When record is created
-2. **Action**: Run script
-3. **Input variables**:
-   - `recordId` → Record ID
-   - `projectTitle` → Project
-   - `projectAcronym` → Project Acronym
-   - `projectDescription` → Project Description
-   - `startDate` → Start Date
-   - `endDate` → End Date
-   - `status` → Status
-   - `rolesSummary` → Roles Summary
-   - `milestoneSummary` → Milestone Rollup
-4. Copy script from `airtable/automation-scripts/generate-scoping-doc.js`
-5. Update `ASANA_TEMPLATE_URL` in script to your template
-6. **Update record** action: Scope of Work - Generated = `scopeOfWork` output
-
-### Step 3: (Optional) URL Validation Automation
-
-1. **Trigger**: When record updated, condition "Asana Board is not empty"
-2. **Action**: Run script from `validate-asana-url.js`
-3. **Update record**: Status = `newStatus` output
-
-## User Workflow
-
-1. **Submit form** with project details
-2. **Open record**, add milestones (linked records)
-3. **Review Scope of Work** with Asana setup guidance
-4. **Click template link** to create Asana board
-5. **Paste Asana URL** into "Asana Board" field
-
-## File Structure
-
-```
-project-creation-form/
-├── README.md
-├── airtable/
-│   ├── form-config.md                  # Field specifications
-│   └── automation-scripts/
-│       ├── generate-scoping-doc.js     # SOW generation (for automations)
-│       └── validate-asana-url.js       # URL validation
-├── airtable-extension/                 # Custom extension (alternative to automations)
-│   ├── README.md                       # Extension setup instructions
-│   ├── package.json
-│   ├── block.json
-│   └── frontend/
-│       └── index.js                    # React component
-├── templates/
-│   └── scoping-doc-template.md
-└── docs/
-    └── workflow-diagram.md
+# Start development server
+npm run dev
 ```
 
-## Two Implementation Options
+Visit `http://localhost:5173` and connect your services in Settings.
 
-### Option A: Automation (automatic)
-- Triggers on record creation
-- Requires setting up automation script with input variables
-- See `airtable/automation-scripts/`
+## Features
 
-### Option B: Extension (manual trigger)
-- User clicks button to generate document
-- Better visibility and error handling
-- See `airtable-extension/README.md` for setup
+### Form-Based Project Creation
+- Config-driven form fields (defined in TOML)
+- Role assignment with team member lookup
+- Repeatable milestones/outcomes section
+- Rich text editing for descriptions
 
-## Remaining Setup
+### Draft & Approval Workflow
+- Save work-in-progress as drafts
+- Share drafts via unique links
+- Approvers can review, edit, and approve
+- Create resources after approval
 
-| Task | Status |
-|------|--------|
-| Create form | Pending |
-| Create automation | Pending |
-| Test workflow | Pending |
+### Integration with External Services
+- **Airtable**: Store project data, milestones, assignments, and drafts
+- **Asana**: Create boards from templates, add milestone tasks
+- **Google**: Create folders, documents, and presentations from templates
+
+### Debug Mode
+- Enable in the Create Resources section
+- Logs all API requests and responses
+- Download debug logs for troubleshooting
+
+## Configuration
+
+The web app uses TOML configuration files:
+
+- `src/config/fields.toml` - Form fields, Airtable mappings, Google placeholders
+- `src/config/integrations.toml` - Service endpoints and settings
+
+See [project-creation-app/docs/CONFIGURATION.md](project-creation-app/docs/CONFIGURATION.md) for details.
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [SETUP.md](SETUP.md) | Local development setup guide |
+| [ADR-001](docs/architecture/ADR-001-oauth-migration.md) | OAuth implementation decision |
+| [ADR-003](docs/architecture/ADR-003-standalone-web-app.md) | Web app architecture |
+| [ADR-004](docs/architecture/ADR-004-draft-approval-workflow.md) | Draft approval workflow |
+
+## Technology Stack
+
+**Web App (project-creation-app):**
+- React 19 with Vite
+- Tailwind CSS 4
+- React Hook Form
+- TanStack Query (React Query)
+- TOML configuration
+
+**OAuth Relay (asana-oauth-relay):**
+- Netlify Functions
+- Node.js
+
+## Contributing
+
+1. Create a feature branch from `main`
+2. Make changes and test locally
+3. Submit a pull request with description of changes
+
+## License
+
+Internal GivingTuesday project.

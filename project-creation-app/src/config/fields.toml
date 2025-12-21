@@ -1,0 +1,272 @@
+# Field configuration for the project creation form
+# Edit this file to add/remove/modify form fields
+# Changes here will automatically update the form and API mappings
+
+[metadata]
+version = "1.0"
+last_updated = "2025-12-19"
+
+# =============================================================================
+# BASIC FIELDS
+# =============================================================================
+
+[fields.project_name]
+type = "text"
+label = "Project Name"
+required = true
+placeholder = "Enter a descriptive project name"
+help_file = "project-name.md"
+section = "basics"
+# Integration mappings
+airtable_field = "Project"
+asana_field = "name"
+google_placeholder = "{{PROJECT_NAME}}"
+
+[fields.project_acronym]
+type = "text"
+label = "Project Acronym"
+required = false
+placeholder = "e.g., CDAI-2025"
+max_length = 20
+help_file = "project-acronym.md"
+section = "basics"
+airtable_field = "Project Acronym"
+google_placeholder = "{{PROJECT_ACRONYM}}"
+
+[fields.start_date]
+type = "date"
+label = "Start Date"
+required = true
+help_file = "dates.md"
+section = "basics"
+airtable_field = "Start Date"
+asana_field = "start_on"
+google_placeholder = "{{START_DATE}}"
+
+[fields.end_date]
+type = "date"
+label = "End Date"
+required = true
+section = "basics"
+airtable_field = "End Date"
+asana_field = "due_on"
+google_placeholder = "{{END_DATE}}"
+
+# =============================================================================
+# DESCRIPTION FIELDS
+# =============================================================================
+
+[fields.project_description]
+type = "richtext"
+label = "Project Description"
+required = true
+placeholder = "Describe the project scope, context, and approach..."
+help_file = "project-description.md"
+section = "description"
+min_length = 100
+airtable_field = "Project Description"
+google_placeholder = "{{PROJECT_DESCRIPTION}}"
+
+[fields.objectives]
+type = "richtext"
+label = "Objectives"
+required = true
+placeholder = "List the key objectives this project aims to achieve..."
+help_file = "objectives.md"
+section = "description"
+airtable_field = "Objectives"
+google_placeholder = "{{OBJECTIVES}}"
+
+# =============================================================================
+# TEAM ROLES
+# =============================================================================
+
+[fields.roles]
+type = "role_assignment"
+label = "Project Team"
+required = true
+help_file = "roles.md"
+section = "team"
+# Team members populated from Airtable
+team_members_table = "Data Team Members"
+team_members_field = "Full Name"
+
+[fields.roles.role_types.project_owner]
+label = "Project Owner"
+required = true
+max = 1
+description = "Primary decision maker and accountable party"
+
+[fields.roles.role_types.project_coordinator]
+label = "Project Coordinator"
+required = true
+max = 1
+description = "Day-to-day management and coordination"
+
+[fields.roles.role_types.technical_support]
+label = "Technical Support"
+required = false
+max = 3
+description = "Technical implementation and data work"
+
+[fields.roles.role_types.comms_support]
+label = "Communications Support"
+required = false
+max = 2
+description = "External communications and stakeholder engagement"
+
+[fields.roles.role_types.oversight]
+label = "Oversight"
+required = false
+max = 2
+description = "Strategic oversight and guidance"
+
+[fields.roles.role_types.other]
+label = "Other"
+required = false
+max = 5
+description = "Additional team members"
+
+# =============================================================================
+# OUTCOMES / MILESTONES
+# =============================================================================
+
+[fields.outcomes]
+type = "repeatable"
+label = "Outcomes & Milestones"
+required = true
+min_items = 1
+max_items = 20
+help_file = "outcomes.md"
+section = "outcomes"
+# Maps to Airtable Milestones table
+airtable_table = "Milestones"
+
+[fields.outcomes.subfields.name]
+type = "text"
+label = "Outcome Name"
+required = true
+placeholder = "e.g., Data Collection Complete"
+airtable_field = "Milestone"
+google_placeholder = "{{MILESTONE_NAME}}"
+
+[fields.outcomes.subfields.description]
+type = "textarea"
+label = "Description"
+required = false
+placeholder = "Brief description of this outcome..."
+airtable_field = "Description"
+
+[fields.outcomes.subfields.due_date]
+type = "date"
+label = "Due Date"
+required = false
+airtable_field = "Due Date"
+
+# =============================================================================
+# AIRTABLE SCHEMA MAPPINGS
+# =============================================================================
+# Configure table names and field mappings for Airtable integration
+# Update these values if your Airtable schema changes
+
+[airtable]
+# Environment variable containing the base ID
+base_id_env = "VITE_AIRTABLE_BASE_ID"
+
+[airtable.tables]
+projects = "Projects"
+milestones = "Milestones"
+assignments = "Assignments"
+team_members = "Data Team Members"
+drafts = "Project Drafts"
+
+[airtable.team_members_fields]
+# Fields to fetch from team members table
+name = "Full Name"
+
+[airtable.project_fields]
+# Maps form data keys to Airtable Projects table field names
+name = "Project"
+acronym = "Project Acronym"
+description = "Project Description"
+objectives = "Objectives"
+start_date = "Start Date"
+end_date = "End Date"
+status = "Status"
+# URL fields populated after resource creation
+asana_url = "Asana Board"
+scoping_doc_url = "Project Scope"
+folder_url = "Project Folder"
+
+
+[airtable.project_defaults]
+# Default values for new projects
+status = "Active"
+
+[airtable.milestone_fields]
+# Maps form data keys to Airtable Milestones table field names
+name = "Milestone"
+description = "Description"
+due_date = "Due Date"
+project_link = "Project"
+
+[airtable.assignment_fields]
+# Maps to Airtable Assignments table field names
+role = "Role"
+team_member_link = "Data Team Member"
+project_link = "Project"
+fte = "FTE"
+
+[airtable.role_values]
+# Maps form role keys to Airtable Role field dropdown values
+project_owner = "Owner"
+project_coordinator = "Project Coordinator"
+technical_support = "Other"
+comms_support = "Other"
+oversight = "Other"
+other = "Other"
+
+# =============================================================================
+# GOOGLE DOCS PLACEHOLDERS
+# =============================================================================
+# Configure placeholder tokens used in Google Doc/Slides templates
+# These get replaced with project data when documents are generated
+
+[google.placeholders]
+project_name = "{{PROJECT_TITLE}}"
+project_acronym = "{{PROJECT_ACRONYM}}"
+project_description = "{{PROJECT_DESCRIPTION}}"
+objectives = "{{OBJECTIVES}}"
+start_date = "{{START_DATE}}"
+end_date = "{{END_DATE}}"
+created_date = "{{CREATED_DATE}}"
+project_owner = "{{PROJECT_OWNER}}"
+project_coordinator = "{{PROJECT_COORDINATOR}}"
+milestone_name = "{{MILESTONE_NAME}}"
+# Table placeholders - these get replaced with formatted tables
+milestones = "{{MILESTONES}}"
+staff_table = "{{STAFF_TABLE}}"
+
+# =============================================================================
+# DRAFT / APPROVAL WORKFLOW
+# =============================================================================
+# Configure the "Project Drafts" table for save/share approval workflow
+
+[airtable.draft_fields]
+# Maps to Airtable Project Drafts table field names
+project_name = "Project Name"
+draft_data = "Draft Data"
+status = "Status"
+created_by_member = "Created By Member"
+approver = "Approver"
+approver_email = "Approver Email"
+approver_notes = "Approver Notes"
+decision_at = "Decision At"
+share_token = "Share Token"
+
+[airtable.draft_status_values]
+# Maps status keys to Airtable dropdown values
+draft = "Draft"
+pending = "Pending Approval"
+approved = "Approved"
+changes_requested = "Changes Requested"

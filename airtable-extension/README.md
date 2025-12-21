@@ -1,6 +1,19 @@
-# Scope of Work Generator - Airtable Extension
+# Project Creation Helper - Airtable Extension (LEGACY)
 
-A custom Airtable extension that generates Scope of Work documents for projects with Asana setup guidance.
+> **Note**: This extension is **legacy** and no longer actively developed. The [Project Creation Helper web application](../project-creation-app/) provides a more complete solution with full Asana and Google Workspace integration.
+
+A custom Airtable extension that provides a form-based interface for creating project records directly within Airtable.
+
+## Status: Legacy
+
+This extension was the original implementation of the Project Creation Helper. While it remains functional for basic use, the standalone web application now provides:
+
+- Full Asana board creation from templates
+- Google Drive folder and document generation
+- Draft approval workflow
+- OAuth-based authentication (no PAT required)
+
+**For new development**, use the [web application](../project-creation-app/) instead.
 
 ## Features
 
@@ -15,7 +28,7 @@ A custom Airtable extension that generates Scope of Work documents for projects 
 
 - Node.js 14+ installed
 - Airtable account with the target base
-- Airtable Blocks CLI
+- Airtable Blocks CLI v2
 
 ### Setup
 
@@ -49,7 +62,7 @@ npm install
 5. **Initialize the extension:**
 
 ```bash
-block init
+npx block init
 ```
 
    When prompted, enter the Block ID from Airtable.
@@ -57,7 +70,7 @@ block init
 6. **Run the extension in development mode:**
 
 ```bash
-block run
+npm run start
 ```
 
    This will open a browser window. In Airtable, click "Edit extension" and enter the URL shown in the terminal (usually `https://localhost:9000`).
@@ -105,7 +118,7 @@ The document is generated in the `generateScopingDocument()` function. Edit the 
 To deploy the extension so all base users can access it:
 
 ```bash
-block release
+npm run release
 ```
 
 This builds the extension and uploads it to Airtable.
@@ -118,10 +131,16 @@ Ensure all required fields exist in your Projects table with exact names as list
 
 ### Extension not loading
 
-- Check that you're running `block run` in the terminal
+- Check that you're running `npm run start` in the terminal
 - Verify the development URL matches what's in Airtable
 - Try refreshing the Airtable page
 
 ### Permission errors
 
 The extension needs write access to update records. Ensure you have Editor or Creator permissions on the base.
+
+## Related Documentation
+
+- [Main Project README](../README.md)
+- [Web Application](../project-creation-app/) (recommended)
+- [Setup Guide](../SETUP.md)

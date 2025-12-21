@@ -1,0 +1,26 @@
+# Integration configuration
+# API keys and secrets should be in environment variables, not here
+
+[oauth]
+relay_url_env = "VITE_OAUTH_RELAY_URL"
+
+[airtable]
+base_id_env = "VITE_AIRTABLE_BASE_ID"
+# Tables
+projects_table = "Projects"
+milestones_table = "Milestones"
+assignments_table = "Assignments"
+team_members_table = "Data Team Members"
+
+[asana]
+team_gid_env = "VITE_ASANA_TEAM_GID"
+template_project_gid = "1209652649504377"
+workspace_gid = "1206584297698339"
+
+[google]
+# Template document/presentation IDs
+scoping_template_id_env = "VITE_GOOGLE_SCOPING_TEMPLATE_ID"
+kickoff_deck_template_id_env = "VITE_GOOGLE_KICKOFF_DECK_TEMPLATE_ID"
+# Shared Drive location
+shared_drive_id_env = "VITE_GOOGLE_SHARED_DRIVE_ID"
+parent_folder_id_env = "VITE_GOOGLE_PARENT_FOLDER_ID"
