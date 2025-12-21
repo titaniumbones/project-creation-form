@@ -17,7 +17,7 @@ project-creation-form/
 ├── project-creation-app/      # React web application (ACTIVE)
 ├── asana-oauth-relay/         # OAuth token relay service (Netlify Functions)
 ├── airtable-extension/        # Airtable custom extension (LEGACY)
-├── airtable/                   # Automation scripts (LEGACY)
+├── airtable-automation/       # Airtable automation scripts (LEGACY)
 ├── docs/                       # Architecture decision records
 │   └── architecture/
 │       ├── ADR-001-oauth-migration.md
@@ -35,7 +35,7 @@ project-creation-form/
 | **project-creation-app** | Active | Modern React + Vite web application with OAuth integration |
 | **asana-oauth-relay** | Active | Netlify Functions handling OAuth flows for all services |
 | **airtable-extension** | Legacy | Original Airtable Block UI (still functional) |
-| **airtable/** | Legacy | Automation scripts for Airtable-only workflow |
+| **airtable-automation** | Legacy | Earliest automation scripts for Airtable-only workflow |
 
 ## Architecture
 
