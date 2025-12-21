@@ -44,7 +44,7 @@ We need those fields in order to implement the next step, below.
 
 ## Use different asana templates for distinct project types
 
-**STATUS: Complete**
+**STATUS: Implemented in Code in PR #6, but project-specific templates have not been specified in `config.toml`**
 
 Several project types have well-developed Asana templates with additional project roles. Implementation:
 
@@ -55,9 +55,31 @@ Several project types have well-developed Asana templates with additional projec
 
 
 
+## Manage Duplicates
+
+This project needs an explicit strategy for managing duplicates.  It is always possible, when interacting  with any of the three services, that some version of the project already exists in that form:
+- in Airtable, if a a Project with the same `Name` exists, it may be a duplicate or the name may already be "taken".
+- in Asana, the same is true: if an Asana Project with the same name exists, it may be an existing board for this project
+- in Google docs, if the Project Folder exists and there is a document or slide deck with the expected name, that document is likely to be a duplicate of this one.  
+
+What's required here is:
+
+1. a way to check for existing duplicate projects in the three platforms before pushing
+2. a UI for presenting possible duplicates
+3. default and non-default choices for each platform, eg:
+   a. Airtable:  Default behaviour may be updating the existing record & reusing the existing staff Assignments and Milestones, with an option to create new records for all of the above
+   b. Asana: Default behaviour is probably using the existing Asana Project and updating existing milestones that match certain criteria, or creating new ones if they don't; creating a new project should be the non-default option  
+   c. Google Docs: Default behaviour is likely leaving the docs as is; a non-default option is to delete the existing docs and create new ones, but this should not be exposed to users until we are sure it works.  
+   
+In all the above cases, there are difficult UI questions and likely tradeoffs. 
+
+If this is implemented, it will definitely require an ADR, and before  beginning work, a draft ADR should be checked in as a vehicle for discussion.  
+
 ## Add Auth0 Authentication
 
-The app should use proper authendication based on the GTDVC authentication manager (Auth0) and the self-signup capacity we've recently released.
+**Status: TODO**
+
+The app should use proper authentication based on the GTDVC authentication manager (Auth0) and the self-signup capacity we've recently released.
 
 This gives room for additional features:
 
@@ -69,8 +91,12 @@ Such features will require more careful reworkign of some existing features.
 
 ## Evaluate whether this can be combined with our project-tracker-app
 
+**Status: Blocked**
+
 The [Project Tracker App](https://github.com/Giving-Tuesday/project-tracker-app) uses the same Airtable data to produce a set of visualizations. It is itself under active development, but when it stabilizes as an MVP we should explore whether it can be published in a single interface with the creation helper. This could be part of a broader expansion of this app into a work tracker that ads analytics to Asana.
 
 ## Use GivingTuesday component libraries
+
+**Status: Blocked**
 
 GivingTuesday is in the process of creating a set of standard React components for use across products. As that develops, we should integrate those components as much as possible.
