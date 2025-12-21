@@ -99,11 +99,62 @@ For detailed configuration documentation, see [docs/CONFIGURATION.md](docs/CONFI
 ## Scripts
 
 ```bash
-npm run dev      # Start development server
-npm run build    # Build for production
-npm run preview  # Preview production build
-npm run lint     # Run ESLint
+npm run dev              # Start development server
+npm run build            # Build for production
+npm run preview          # Preview production build
+npm run lint             # Run ESLint
+npm run deploy           # Deploy to Netlify (production)
+npm run deploy:preview   # Deploy preview to Netlify
+npm run env:sync         # Dry run: show env vars to sync
+npm run env:sync:execute # Sync .env to Netlify
 ```
+
+## Deployment
+
+The app is configured for deployment on Netlify.
+
+### Prerequisites
+
+```bash
+# Install Netlify CLI
+npm install -g netlify-cli
+
+# Login to Netlify
+netlify login
+```
+
+### First-Time Setup
+
+```bash
+# Link to existing site or create new one
+netlify link
+# or
+netlify init
+
+# Sync environment variables from .env to Netlify
+npm run env:sync          # Preview what will be set
+npm run env:sync:execute  # Actually set the variables
+```
+
+### Deploy
+
+```bash
+# Build and deploy to production
+npm run deploy
+
+# Deploy a preview (for testing)
+npm run deploy:preview
+```
+
+### Environment Variables
+
+The `scripts/sync-env-to-netlify.sh` script reads your local `.env` file and sets the corresponding environment variables on Netlify. It automatically:
+
+- Replaces `VITE_OAUTH_RELAY_URL` with the production OAuth relay URL
+- Masks sensitive values in the dry-run output
+- Only syncs `VITE_*` variables (ignoring comments and other vars)
+
+**Manual setup**: Alternatively, set variables in the Netlify dashboard under Site settings > Environment variables.
 
 ## Technology Stack
 
