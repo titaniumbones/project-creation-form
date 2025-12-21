@@ -15,6 +15,8 @@ interface ParsedConfig extends Config {
     role_values: Record<string, string>;
     draft_fields: Record<string, string>;
     draft_status_values: Record<string, string>;
+    funder_fields: Record<string, string>;
+    parent_initiative_fields: Record<string, string>;
   };
   google: {
     placeholders: Record<string, string>;
@@ -57,6 +59,8 @@ export const airtableProjectDefaults = airtableConfig.project_defaults || {};
 export const airtableRoleValues = airtableConfig.role_values || {};
 export const airtableDraftFields = airtableConfig.draft_fields || {};
 export const airtableDraftStatusValues = airtableConfig.draft_status_values || {};
+export const airtableFunderFields = airtableConfig.funder_fields || {};
+export const airtableParentInitiativeFields = airtableConfig.parent_initiative_fields || {};
 
 // Google configuration
 export const googleConfig = parsedConfig.google || {};

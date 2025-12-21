@@ -11,6 +11,9 @@ import {
   DEFAULT_FORM_VALUES,
 } from '../components/form/FormComponents';
 import { useTeamMembers } from '../hooks/useTeamMembers';
+import { useFunders } from '../hooks/useFunders';
+import { useParentInitiatives } from '../hooks/useParentInitiatives';
+import { useFieldsConfig } from '../hooks/useConfig';
 import { getConnectionStatus, userManager } from '../services/oauth';
 import * as airtable from '../services/airtable';
 import { airtableProjectFields, airtableTables } from '../services/airtable';
@@ -149,6 +152,10 @@ export default function ProjectForm() {
   const isConnected = connectionStatus.airtable;
 
   const { data: teamMembers = [], isLoading: loadingMembers } = useTeamMembers();
+  const { data: funders = [] } = useFunders();
+  const { data: parentInitiatives = [] } = useParentInitiatives();
+  const { config } = useFieldsConfig();
+  const projectTypeOptions = (config?.fields?.project_type?.options as string[]) || [];
 
   // Form setup with draft restoration
   const {
@@ -760,6 +767,36 @@ export default function ProjectForm() {
                   className="form-input"
                   {...register('endDate', { required: 'End date is required' })}
                 />
+              </FormField>
+            </div>
+
+            {/* Optional Classification Fields */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
+              <FormField label="Funder">
+                <select className="form-input" {...register('funder')}>
+                  <option value="">Select funder (optional)...</option>
+                  {funders.map((f) => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))}
+                </select>
+              </FormField>
+
+              <FormField label="Parent Initiative">
+                <select className="form-input" {...register('parentInitiative')}>
+                  <option value="">Select initiative (optional)...</option>
+                  {parentInitiatives.map((i) => (
+                    <option key={i.id} value={i.id}>{i.name}</option>
+                  ))}
+                </select>
+              </FormField>
+
+              <FormField label="Project Type">
+                <select className="form-input" {...register('projectType')}>
+                  <option value="">Select type (optional)...</option>
+                  {projectTypeOptions.map((type) => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
               </FormField>
             </div>
           </FormSection>

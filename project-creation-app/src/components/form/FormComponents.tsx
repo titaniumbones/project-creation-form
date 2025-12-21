@@ -288,4 +288,7 @@ export const DEFAULT_FORM_VALUES: FormData = {
     other: { memberId: '', fte: '' },
   },
   outcomes: [{ name: '', description: '', dueDate: '' }],
+  funder: '',
+  parentInitiative: '',
+  projectType: '',
 };

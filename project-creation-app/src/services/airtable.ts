@@ -9,8 +9,10 @@ import {
   airtableTeamMembersFields,
   airtableProjectDefaults,
   airtableRoleValues,
+  airtableFunderFields,
+  airtableParentInitiativeFields,
 } from '../config';
-import type { AirtableRecord, TeamMember, RoleAssignment } from '../types';
+import type { AirtableRecord, TeamMember, RoleAssignment, Funder, ParentInitiative } from '../types';
 
 const BASE_ID = import.meta.env.VITE_AIRTABLE_BASE_ID;
 const API_URL = 'https://api.airtable.com/v0';
@@ -35,6 +37,9 @@ interface ProjectData {
   objectives?: string;
   startDate?: string;
   endDate?: string;
+  funder?: string;
+  parentInitiative?: string;
+  projectType?: string;
 }
 
 interface MilestoneData {
@@ -128,6 +133,42 @@ export async function getTeamMembers(): Promise<TeamMember[]> {
   }));
 }
 
+// Get funders for project assignment
+export async function getFunders(): Promise<Funder[]> {
+  const tableName = airtableTables.funders || 'Funders';
+  const nameField = airtableFunderFields.name || 'Name';
+
+  debugLogger.log('airtable', 'Fetching funders', { tableName, nameField });
+
+  const records = await getRecords(tableName, {
+    fields: [nameField],
+    sort: [{ field: nameField, direction: 'asc' }],
+  });
+
+  debugLogger.log('airtable', 'Funders fetched', { count: records.length });
+
+  return records.map(r => ({
+    id: r.id,
+    name: r.fields[nameField] as string,
+  }));
+}
+
+// Get parent initiatives for project assignment
+export async function getParentInitiatives(): Promise<ParentInitiative[]> {
+  const tableName = airtableTables.parent_initiatives || 'Parent Initiatives';
+  const nameField = airtableParentInitiativeFields.name || 'Name';
+
+  const records = await getRecords(tableName, {
+    fields: [nameField],
+    sort: [{ field: nameField, direction: 'asc' }],
+  });
+
+  return records.map(r => ({
+    id: r.id,
+    name: r.fields[nameField] as string,
+  }));
+}
+
 // Create a project record
 export async function createProject(projectData: ProjectData): Promise<AirtableRecord> {
   const tableName = airtableTables.projects || 'Projects';
@@ -150,6 +191,18 @@ export async function createProject(projectData: ProjectData): Promise<AirtableR
     [f.end_date || 'End Date']: projectData.endDate || null,
     [f.status || 'Status']: defaults.status || 'In Ideation',
   };
+
+  // Add optional linked record fields (Airtable expects array for linked records)
+  if (projectData.funder) {
+    fields[f.funder || 'Funder'] = [projectData.funder];
+  }
+  if (projectData.parentInitiative) {
+    fields[f.parent_initiative || 'Parent Initiative'] = [projectData.parentInitiative];
+  }
+  // Add optional single-select field
+  if (projectData.projectType) {
+    fields[f.project_type || 'Project Type'] = projectData.projectType;
+  }
 
   // Log the exact fields being sent
   debugLogger.log('airtable', 'Creating project with fields', {
@@ -308,6 +361,8 @@ export { airtableProjectFields, airtableTables };
 export default {
   getRecords,
   getTeamMembers,
+  getFunders,
+  getParentInitiatives,
   createProject,
   createMilestones,
   createAssignments,

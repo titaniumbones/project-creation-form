@@ -22,6 +22,9 @@ export interface FormData {
   objectives: string;
   roles: Record<string, RoleAssignment>;
   outcomes: Outcome[];
+  funder?: string;
+  parentInitiative?: string;
+  projectType?: string;
 }
 
 // =============================================================================
@@ -29,6 +32,16 @@ export interface FormData {
 // =============================================================================
 
 export interface TeamMember {
+  id: string;
+  name: string;
+}
+
+export interface Funder {
+  id: string;
+  name: string;
+}
+
+export interface ParentInitiative {
   id: string;
   name: string;
 }
@@ -202,6 +215,8 @@ export interface AirtableConfig {
   role_values: Record<string, string>;
   draft_fields: Record<string, string>;
   draft_status_values: Record<string, string>;
+  funder_fields?: Record<string, string>;
+  parent_initiative_fields?: Record<string, string>;
 }
 
 export interface GooglePlaceholdersConfig {
