@@ -43,10 +43,10 @@ const services = [
 
 function ServiceCard({ service, isConnected, onConnect, onDisconnect, isLoading }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6">
+    <div className="bg-white rounded-xl border border-gray-200 p-4">
       <div className="flex items-start justify-between">
         <div className="flex items-start space-x-4">
-          <div className="text-3xl">{service.icon}</div>
+          <div className="text-2xl">{service.icon}</div>
           <div>
             <h3 className="font-semibold text-gray-900">
               {service.name}
@@ -148,8 +148,8 @@ export default function Settings() {
     <div className="min-h-screen bg-gray-50">
       <Header />
 
-      <main className="max-w-3xl mx-auto px-4 py-8">
-        <div className="mb-8">
+      <main className="max-w-3xl mx-auto px-4 py-4">
+        <div className="mb-4">
           <Link
             to="/"
             className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700 mb-4"
@@ -158,14 +158,14 @@ export default function Settings() {
             Back to form
           </Link>
 
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Settings</h1>
+          <h1 className="text-xl font-bold text-gray-900 mb-1">Settings</h1>
           <p className="text-gray-600">
             Connect your accounts to enable project creation across all platforms.
           </p>
         </div>
 
         {/* Connection summary */}
-        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
           <p className="text-blue-800">
             <strong>{connectedCount}</strong> of {services.length} services connected
             {connectedCount === services.length && (
@@ -176,9 +176,9 @@ export default function Settings() {
 
         {/* Your Profile Section */}
         {connectionStatus.airtable && (
-          <div className="mb-6 bg-white rounded-xl border border-gray-200 p-6">
+          <div className="mb-6 bg-white rounded-xl border border-gray-200 p-4">
             <div className="flex items-start space-x-4">
-              <div className="text-3xl">
+              <div className="text-2xl">
                 <UserCircleIcon className="w-8 h-8 text-gray-400" />
               </div>
               <div className="flex-1">
@@ -218,7 +218,7 @@ export default function Settings() {
 
         {/* Error message */}
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700">
             {error}
           </div>
         )}

@@ -670,9 +670,9 @@ export default function ProjectForm() {
 
       <ProgressIndicator sections={sections} currentSection={currentSection} />
 
-      <main className="max-w-3xl mx-auto px-4 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+      <main className="max-w-3xl mx-auto px-4 py-4">
+        <div className="mb-4">
+          <h1 className="text-xl font-bold text-gray-900 mb-1">
             Create New Project
           </h1>
           <p className="text-gray-600">
@@ -682,7 +682,7 @@ export default function ProjectForm() {
 
         {/* Connection warning */}
         {!isConnected && (
-          <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start space-x-3">
+          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start space-x-3">
             <ExclamationTriangleIcon className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
             <div>
               <p className="text-yellow-800 font-medium">Not connected to services</p>

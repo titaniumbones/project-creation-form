@@ -19,6 +19,7 @@
     "@tanstack/react-query": "^5.90.12",
     "@uiw/react-md-editor": "^4.0.11",
     "date-fns": "^4.1.0",
+    "gt-styles": "github:Giving-Tuesday/gt-styles",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-hook-form": "^7.68.0",

@@ -26,24 +26,24 @@ export default function Success() {
     <div className="min-h-screen bg-gray-50">
       <Header />
 
-      <main className="max-w-2xl mx-auto px-4 py-16">
+      <main className="max-w-2xl mx-auto px-4 py-8">
         <div className="text-center">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-6">
             <CheckCircleIcon className="w-10 h-10 text-green-600" />
           </div>
 
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          <h1 className="text-xl font-bold text-gray-900 mb-1">
             Project Created Successfully!
           </h1>
 
-          <p className="text-lg text-gray-600 mb-8">
+          <p className="text-lg text-gray-600 mb-4">
             <strong>{projectName}</strong> has been set up across all connected platforms.
           </p>
         </div>
 
         {/* Resource links */}
         {links.length > 0 && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6 mb-8">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
             <h2 className="font-semibold text-gray-900 mb-4">Quick Links</h2>
             <div className="space-y-3">
               {links.map((link) => (
@@ -66,7 +66,7 @@ export default function Success() {
         )}
 
         {/* What was created */}
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 mb-8">
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
           <h2 className="font-semibold text-blue-900 mb-3">What was created</h2>
           <ul className="text-blue-800 space-y-2 text-sm">
             <li>✓ Airtable project record with team assignments</li>

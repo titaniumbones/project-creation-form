@@ -215,16 +215,16 @@ export default function MyDrafts() {
     <div className="min-h-screen bg-gray-50">
       <Header />
 
-      <main className="max-w-4xl mx-auto px-4 py-8">
+      <main className="max-w-4xl mx-auto px-4 py-4">
         {/* Header */}
-        <div className="mb-8">
+        <div className="mb-4">
           <div className="flex items-center space-x-2 text-sm text-gray-500 mb-2">
             <Link to="/" className="hover:text-blue-600">Home</Link>
             <span>/</span>
             <span>My Drafts</span>
           </div>
           <div className="flex items-center justify-between">
-            <h1 className="text-3xl font-bold text-gray-900">My Drafts</h1>
+            <h1 className="text-xl font-bold text-gray-900">My Drafts</h1>
             <Link
               to="/"
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -236,7 +236,7 @@ export default function MyDrafts() {
 
         {/* Message */}
         {message && (
-          <div className={`mb-6 p-4 rounded-lg ${
+          <div className={`mb-4 p-3 rounded-lg ${
             message.type === 'success'
               ? 'bg-green-50 border border-green-200 text-green-700'
               : 'bg-red-50 border border-red-200 text-red-700'
@@ -247,7 +247,7 @@ export default function MyDrafts() {
 
         {/* Not Connected Warning */}
         {!connectionStatus.airtable && (
-          <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start space-x-3">
+          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start space-x-3">
             <ExclamationTriangleIcon className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
             <div>
               <p className="text-yellow-800 font-medium">Not connected to Airtable</p>
@@ -268,7 +268,7 @@ export default function MyDrafts() {
 
         {/* Error */}
         {error && !loading && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
             <p className="text-red-700">{error}</p>
           </div>
         )}
@@ -278,8 +278,8 @@ export default function MyDrafts() {
           <>
             {/* Pending Approval Section */}
             {pendingApproval.length > 0 && (
-              <div className="mb-8">
-                <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center space-x-2">
+              <div className="mb-4">
+                <h2 className="text-base font-semibold text-gray-900 mb-4 flex items-center space-x-2">
                   <ClockIcon className="w-5 h-5 text-yellow-600" />
                   <span>Awaiting Your Approval ({pendingApproval.length})</span>
                 </h2>
@@ -316,7 +316,7 @@ export default function MyDrafts() {
             {/* My Drafts Section */}
             <div>
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-semibold text-gray-900">
+                <h2 className="text-base font-semibold text-gray-900">
                   My Drafts ({filteredDrafts.length})
                 </h2>
                 <div className="flex items-center space-x-2">

@@ -72,8 +72,8 @@ export default function ShareDraftModal({ isOpen, onClose, onSubmit, teamMembers
         className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
       >
         {/* Header */}
-        <div className="bg-blue-600 px-6 py-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">Share for Approval</h2>
+        <div className="bg-blue-600 px-4 py-3 flex items-center justify-between">
+          <h2 className="text-base font-semibold text-white">Share for Approval</h2>
           <button
             type="button"
             onClick={onClose}
@@ -84,7 +84,7 @@ export default function ShareDraftModal({ isOpen, onClose, onSubmit, teamMembers
         </div>
 
         {/* Content */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-4 space-y-3">
           <p className="text-gray-600 text-sm">
             Select a team member to send this draft for approval. They will receive an email
             with a link to review and approve the project scope.
