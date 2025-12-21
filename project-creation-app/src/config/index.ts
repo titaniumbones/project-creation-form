@@ -2,14 +2,48 @@
 // Parses TOML config at module load time
 import toml from 'toml';
 import fieldsConfigRaw from './fields.toml?raw';
+import type { Config, AirtableConfig } from '../types';
 
-let parsedConfig = null;
+interface ParsedConfig extends Config {
+  airtable: AirtableConfig & {
+    tables: Record<string, string>;
+    project_fields: Record<string, string>;
+    milestone_fields: Record<string, string>;
+    assignment_fields: Record<string, string>;
+    team_members_fields: Record<string, string>;
+    project_defaults: Record<string, string>;
+    role_values: Record<string, string>;
+    draft_fields: Record<string, string>;
+    draft_status_values: Record<string, string>;
+  };
+  google: {
+    placeholders: Record<string, string>;
+  };
+}
+
+let parsedConfig: ParsedConfig;
 
 try {
-  parsedConfig = toml.parse(fieldsConfigRaw);
+  parsedConfig = toml.parse(fieldsConfigRaw) as ParsedConfig;
 } catch (err) {
   console.error('Failed to parse fields.toml:', err);
-  parsedConfig = {};
+  parsedConfig = {
+    fields: {},
+    airtable: {
+      tables: {},
+      project_fields: {},
+      milestone_fields: {},
+      assignment_fields: {},
+      team_members_fields: {},
+      project_defaults: {},
+      role_values: {},
+      draft_fields: {},
+      draft_status_values: {},
+    },
+    google: {
+      placeholders: {},
+    },
+  };
 }
 
 // Airtable configuration

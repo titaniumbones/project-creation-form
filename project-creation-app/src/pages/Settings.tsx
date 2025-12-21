@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, ChangeEvent } from 'react';
 import { Link } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import {
@@ -15,9 +15,20 @@ import {
   userManager,
 } from '../services/oauth';
 import { useTeamMembers } from '../hooks/useTeamMembers';
+import type { ConnectionStatus } from '../types';
+
+type ServiceKey = 'airtable' | 'asana' | 'google';
+
+interface ServiceConfig {
+  key: ServiceKey;
+  name: string;
+  description: string;
+  icon: string;
+  required: boolean;
+}
 
 // Service configuration
-const services = [
+const services: ServiceConfig[] = [
   {
     key: 'airtable',
     name: 'Airtable',
@@ -41,7 +52,15 @@ const services = [
   },
 ];
 
-function ServiceCard({ service, isConnected, onConnect, onDisconnect, isLoading }) {
+interface ServiceCardProps {
+  service: ServiceConfig;
+  isConnected: boolean;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  isLoading: boolean;
+}
+
+function ServiceCard({ service, isConnected, onConnect, onDisconnect, isLoading }: ServiceCardProps) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6">
       <div className="flex items-start justify-between">
@@ -99,10 +118,10 @@ function ServiceCard({ service, isConnected, onConnect, onDisconnect, isLoading 
 }
 
 export default function Settings() {
-  const [connectionStatus, setConnectionStatus] = useState(getConnectionStatus);
-  const [loadingService, setLoadingService] = useState(null);
-  const [error, setError] = useState(null);
-  const [selectedProfile, setSelectedProfile] = useState(userManager.getTeamMemberId() || '');
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(getConnectionStatus);
+  const [loadingService, setLoadingService] = useState<ServiceKey | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedProfile, setSelectedProfile] = useState<string>(userManager.getTeamMemberId() || '');
 
   // Fetch team members when Airtable is connected
   const { data: teamMembers = [], isLoading: loadingMembers } = useTeamMembers();
@@ -115,7 +134,7 @@ export default function Settings() {
     }
   }, []);
 
-  const handleProfileChange = (e) => {
+  const handleProfileChange = (e: ChangeEvent<HTMLSelectElement>) => {
     const memberId = e.target.value;
     setSelectedProfile(memberId);
     if (memberId) {
@@ -123,7 +142,7 @@ export default function Settings() {
     }
   };
 
-  const handleConnect = async (serviceKey) => {
+  const handleConnect = async (serviceKey: ServiceKey) => {
     setLoadingService(serviceKey);
     setError(null);
 
@@ -131,13 +150,13 @@ export default function Settings() {
       await startOAuthFlow(serviceKey);
       setConnectionStatus(getConnectionStatus());
     } catch (err) {
-      setError(`Failed to connect to ${serviceKey}: ${err.message}`);
+      setError(`Failed to connect to ${serviceKey}: ${(err as Error).message}`);
     } finally {
       setLoadingService(null);
     }
   };
 
-  const handleDisconnect = (serviceKey) => {
+  const handleDisconnect = (serviceKey: ServiceKey) => {
     disconnectService(serviceKey);
     setConnectionStatus(getConnectionStatus());
   };

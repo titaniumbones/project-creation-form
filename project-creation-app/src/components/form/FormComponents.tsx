@@ -1,4 +1,6 @@
 // Shared form components used by ProjectForm and ReviewDraft
+import { ReactNode } from 'react';
+import { UseFormRegister, FieldErrors, FieldArrayWithId, UseFieldArrayAppend, UseFieldArrayRemove } from 'react-hook-form';
 import HelpTooltip from '../ui/HelpTooltip';
 import {
   CheckCircleIcon,
@@ -7,9 +9,17 @@ import {
   PlusIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline';
+import type { TeamMember, FormData } from '../../types';
 
 // Form section wrapper
-export function FormSection({ id, title, children, helpFile }) {
+interface FormSectionProps {
+  id: string;
+  title: string;
+  children: ReactNode;
+  helpFile?: string;
+}
+
+export function FormSection({ id, title, children, helpFile }: FormSectionProps) {
   return (
     <section id={id} className="form-section scroll-mt-24">
       <div className="flex items-center justify-between mb-4">
@@ -22,7 +32,15 @@ export function FormSection({ id, title, children, helpFile }) {
 }
 
 // Form field wrapper
-export function FormField({ label, required, helpFile, error, children }) {
+interface FormFieldProps {
+  label: string;
+  required?: boolean;
+  helpFile?: string;
+  error?: { message?: string };
+  children: ReactNode;
+}
+
+export function FormField({ label, required, helpFile, error, children }: FormFieldProps) {
   return (
     <div className="mb-4">
       <div className="flex items-center justify-between mb-1">
@@ -41,7 +59,17 @@ export function FormField({ label, required, helpFile, error, children }) {
 }
 
 // Action button component for individual steps
-export function ActionButton({ label, onClick, isLoading, isComplete, url, disabled, error }) {
+interface ActionButtonProps {
+  label: string;
+  onClick: () => void | Promise<void>;
+  isLoading: boolean;
+  isComplete: boolean;
+  url?: string;
+  disabled?: boolean;
+  error?: string;
+}
+
+export function ActionButton({ label, onClick, isLoading, isComplete, url, disabled, error }: ActionButtonProps) {
   return (
     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
       <div className="flex items-center space-x-3">
@@ -90,7 +118,14 @@ export function ActionButton({ label, onClick, isLoading, isComplete, url, disab
 }
 
 // Role assignment list configuration
-export const ROLE_TYPES = [
+interface RoleType {
+  key: string;
+  label: string;
+  required: boolean;
+  description: string;
+}
+
+export const ROLE_TYPES: RoleType[] = [
   { key: 'project_owner', label: 'Project Owner', required: true, description: 'Primary decision maker and accountable party' },
   { key: 'project_coordinator', label: 'Project Coordinator', required: true, description: 'Day-to-day management and coordination' },
   { key: 'technical_support', label: 'Technical Support', required: false, description: 'Technical implementation and data work' },
@@ -100,7 +135,14 @@ export const ROLE_TYPES = [
 ];
 
 // Role assignment section component
-export function RoleAssignmentSection({ register, errors, teamMembers, disabled = false }) {
+interface RoleAssignmentSectionProps {
+  register: UseFormRegister<FormData>;
+  errors?: FieldErrors<FormData>;
+  teamMembers: TeamMember[];
+  disabled?: boolean;
+}
+
+export function RoleAssignmentSection({ register, errors, teamMembers, disabled = false }: RoleAssignmentSectionProps) {
   return (
     <div className="space-y-4">
       {ROLE_TYPES.map((role) => (
@@ -108,13 +150,13 @@ export function RoleAssignmentSection({ register, errors, teamMembers, disabled 
           key={role.key}
           label={role.label}
           required={role.required}
-          error={errors?.roles?.[role.key]?.memberId}
+          error={errors?.roles?.[role.key as keyof FormData['roles']]?.memberId}
         >
           <div className="flex gap-3">
             <select
               className="form-input flex-1"
               disabled={disabled}
-              {...register(`roles.${role.key}.memberId`)}
+              {...register(`roles.${role.key as keyof FormData['roles']}.memberId`)}
             >
               <option value="">Select team member...</option>
               {teamMembers.map((member) => (
@@ -128,7 +170,7 @@ export function RoleAssignmentSection({ register, errors, teamMembers, disabled 
               className="form-input w-24"
               placeholder="% FTE"
               disabled={disabled}
-              {...register(`roles.${role.key}.fte`)}
+              {...register(`roles.${role.key as keyof FormData['roles']}.fte`)}
             />
           </div>
         </FormField>
@@ -138,7 +180,15 @@ export function RoleAssignmentSection({ register, errors, teamMembers, disabled 
 }
 
 // Outcome item component
-export function OutcomeItem({ index, register, onRemove, canRemove, disabled = false }) {
+interface OutcomeItemProps {
+  index: number;
+  register: UseFormRegister<FormData>;
+  onRemove: () => void;
+  canRemove: boolean;
+  disabled?: boolean;
+}
+
+export function OutcomeItem({ index, register, onRemove, canRemove, disabled = false }: OutcomeItemProps) {
   return (
     <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
       <div className="flex justify-between items-start mb-3">
@@ -185,7 +235,15 @@ export function OutcomeItem({ index, register, onRemove, canRemove, disabled = f
 }
 
 // Outcomes section component
-export function OutcomesSection({ fields, register, append, remove, disabled = false }) {
+interface OutcomesSectionProps {
+  fields: FieldArrayWithId<FormData, 'outcomes', 'id'>[];
+  register: UseFormRegister<FormData>;
+  append: UseFieldArrayAppend<FormData, 'outcomes'>;
+  remove: UseFieldArrayRemove;
+  disabled?: boolean;
+}
+
+export function OutcomesSection({ fields, register, append, remove, disabled = false }: OutcomesSectionProps) {
   return (
     <div className="space-y-4">
       {fields.map((field, index) => (
@@ -214,7 +272,7 @@ export function OutcomesSection({ fields, register, append, remove, disabled = f
 }
 
 // Default form values
-export const DEFAULT_FORM_VALUES = {
+export const DEFAULT_FORM_VALUES: FormData = {
   projectName: '',
   projectAcronym: '',
   startDate: '',

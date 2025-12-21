@@ -1,10 +1,39 @@
 // OAuth token management for all services
+import type { TokenData, UserInfo, ConnectionStatus } from '../types';
+
 const TOKEN_STORAGE_KEY = 'project_creator_tokens';
 const USER_INFO_KEY = 'project_creator_user';
 const OAUTH_RELAY_URL = import.meta.env.VITE_OAUTH_RELAY_URL || 'https://airtable-asana-integration-oauth.netlify.app';
 
+type ServiceName = 'airtable' | 'asana' | 'google';
+
+interface TokenStorage {
+  [key: string]: TokenData;
+}
+
+interface AirtableUserInfo {
+  id: string;
+  email: string;
+  [key: string]: unknown;
+}
+
+interface OAuthCallbackData {
+  type: string;
+  error?: string;
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+}
+
+interface RefreshResponse {
+  error?: string;
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+}
+
 export const tokenManager = {
-  getTokens() {
+  getTokens(): TokenStorage {
     try {
       const stored = localStorage.getItem(TOKEN_STORAGE_KEY);
       return stored ? JSON.parse(stored) : {};
@@ -13,32 +42,32 @@ export const tokenManager = {
     }
   },
 
-  getToken(service) {
+  getToken(service: ServiceName): TokenData | null {
     const tokens = this.getTokens();
     return tokens[service] || null;
   },
 
-  setToken(service, tokenData) {
+  setToken(service: ServiceName, tokenData: Omit<TokenData, 'savedAt'>): void {
     const tokens = this.getTokens();
     tokens[service] = {
       ...tokenData,
       savedAt: Date.now(),
-    };
+    } as TokenData;
     localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(tokens));
   },
 
-  clearToken(service) {
+  clearToken(service: ServiceName): void {
     const tokens = this.getTokens();
     delete tokens[service];
     localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(tokens));
   },
 
-  clearAll() {
+  clearAll(): void {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
     localStorage.removeItem(USER_INFO_KEY);
   },
 
-  isTokenValid(service) {
+  isTokenValid(service: ServiceName): boolean {
     const token = this.getToken(service);
     if (!token || !token.access_token) return false;
     if (token.expiresAt && Date.now() > token.expiresAt - 60000) return false;
@@ -48,7 +77,7 @@ export const tokenManager = {
 
 // User info management (for draft ownership)
 export const userManager = {
-  getUserInfo() {
+  getUserInfo(): UserInfo | null {
     try {
       const stored = localStorage.getItem(USER_INFO_KEY);
       return stored ? JSON.parse(stored) : null;
@@ -57,26 +86,26 @@ export const userManager = {
     }
   },
 
-  setUserInfo(info) {
+  setUserInfo(info: UserInfo): void {
     localStorage.setItem(USER_INFO_KEY, JSON.stringify(info));
   },
 
-  clearUserInfo() {
+  clearUserInfo(): void {
     localStorage.removeItem(USER_INFO_KEY);
   },
 
-  getEmail() {
+  getEmail(): string | null {
     const info = this.getUserInfo();
     return info?.email || null;
   },
 
   // Get/set current user's team member ID (selected in Settings)
-  getTeamMemberId() {
+  getTeamMemberId(): string | null {
     const info = this.getUserInfo();
     return info?.teamMemberId || null;
   },
 
-  setTeamMemberId(memberId) {
+  setTeamMemberId(memberId: string): void {
     const info = this.getUserInfo() || {};
     info.teamMemberId = memberId;
     this.setUserInfo(info);
@@ -84,7 +113,7 @@ export const userManager = {
 };
 
 // Fetch current user info from Airtable
-async function fetchAirtableUserInfo(accessToken) {
+async function fetchAirtableUserInfo(accessToken: string): Promise<AirtableUserInfo | null> {
   try {
     const response = await fetch('https://api.airtable.com/v0/meta/whoami', {
       headers: {
@@ -109,7 +138,7 @@ async function fetchAirtableUserInfo(accessToken) {
 }
 
 // Get current user email (tries Airtable first, then cached)
-export async function getCurrentUserEmail() {
+export async function getCurrentUserEmail(): Promise<string | null> {
   // Check cached user info first
   const cached = userManager.getUserInfo();
   if (cached?.email) {
@@ -134,7 +163,7 @@ export async function getCurrentUserEmail() {
 }
 
 // Get valid access token, refreshing if needed
-export async function getValidToken(service) {
+export async function getValidToken(service: ServiceName): Promise<string | null> {
   const token = tokenManager.getToken(service);
 
   if (!token || !token.access_token) {
@@ -159,7 +188,7 @@ export async function getValidToken(service) {
       body: JSON.stringify({ refresh_token: token.refresh_token }),
     });
 
-    const newTokens = await response.json();
+    const newTokens: RefreshResponse = await response.json();
 
     if (newTokens.error) {
       console.error(`[${service}] Token refresh failed:`, newTokens.error);
@@ -169,12 +198,12 @@ export async function getValidToken(service) {
 
     // Save new tokens
     tokenManager.setToken(service, {
-      access_token: newTokens.access_token,
+      access_token: newTokens.access_token!,
       refresh_token: newTokens.refresh_token || token.refresh_token,
-      expiresAt: Date.now() + (newTokens.expires_in * 1000),
+      expiresAt: Date.now() + ((newTokens.expires_in || 3600) * 1000),
     });
 
-    return newTokens.access_token;
+    return newTokens.access_token!;
   } catch (err) {
     console.error(`[${service}] Token refresh error:`, err);
     return null;
@@ -182,7 +211,7 @@ export async function getValidToken(service) {
 }
 
 // OAuth login flow
-export function startOAuthFlow(service) {
+export function startOAuthFlow(service: ServiceName): Promise<{ access_token: string; refresh_token?: string }> {
   return new Promise((resolve, reject) => {
     const popup = window.open(
       `${OAUTH_RELAY_URL}/.netlify/functions/${service}-auth`,
@@ -195,7 +224,9 @@ export function startOAuthFlow(service) {
       return;
     }
 
-    const messageHandler = (event) => {
+    let checkClosed: ReturnType<typeof setInterval>;
+
+    const messageHandler = (event: MessageEvent<OAuthCallbackData>) => {
       // Verify origin
       if (event.origin !== OAUTH_RELAY_URL) return;
 
@@ -213,10 +244,15 @@ export function startOAuthFlow(service) {
 
       const { access_token, refresh_token, expires_in } = event.data;
 
+      if (!access_token) {
+        reject(new Error('No access token received'));
+        return;
+      }
+
       tokenManager.setToken(service, {
         access_token,
         refresh_token,
-        expiresAt: Date.now() + (expires_in * 1000),
+        expiresAt: Date.now() + ((expires_in || 3600) * 1000),
       });
 
       // Fetch and cache user info after Airtable authentication
@@ -234,7 +270,7 @@ export function startOAuthFlow(service) {
     window.addEventListener('message', messageHandler);
 
     // Check if popup was closed without completing
-    const checkClosed = setInterval(() => {
+    checkClosed = setInterval(() => {
       if (popup?.closed) {
         clearInterval(checkClosed);
         window.removeEventListener('message', messageHandler);
@@ -245,12 +281,12 @@ export function startOAuthFlow(service) {
 }
 
 // Disconnect a service
-export function disconnectService(service) {
+export function disconnectService(service: ServiceName): void {
   tokenManager.clearToken(service);
 }
 
 // Check connection status for all services
-export function getConnectionStatus() {
+export function getConnectionStatus(): ConnectionStatus {
   return {
     airtable: tokenManager.isTokenValid('airtable'),
     asana: tokenManager.isTokenValid('asana'),

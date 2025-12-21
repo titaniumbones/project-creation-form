@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Header from '../components/layout/Header';
@@ -28,13 +28,25 @@ import {
   PaperAirplaneIcon,
   ClipboardDocumentListIcon,
 } from '@heroicons/react/24/outline';
+import type { FormData, CreatedResources, ConnectionStatus, DraftStatus, RoleAssignment } from '../types';
+import type { AsanaUser, RoleAssignment as AsanaRoleAssignment } from '../services/asana';
 
 // Local storage keys for form state persistence
 const DRAFT_KEY = 'project_creation_draft';
 const CREATED_RESOURCES_KEY = 'project_creation_resources';
 
+interface Section {
+  id: string;
+  label: string;
+}
+
 // Section progress indicator
-function ProgressIndicator({ sections, currentSection }) {
+interface ProgressIndicatorProps {
+  sections: Section[];
+  currentSection: string;
+}
+
+function ProgressIndicator({ sections, currentSection }: ProgressIndicatorProps) {
   return (
     <div className="hidden lg:block fixed left-8 top-1/2 -translate-y-1/2">
       <nav className="space-y-2">
@@ -56,30 +68,43 @@ function ProgressIndicator({ sections, currentSection }) {
   );
 }
 
+type LoadingActionType = 'asanaBoard' | 'asanaMilestones' | 'scopingDoc' | 'kickoffDeck' | 'airtable' | 'saveDraft' | null;
+
+interface DraftMessage {
+  type: 'success' | 'error';
+  text: string;
+}
+
+interface ShareDraftData {
+  memberId?: string | null;
+  memberName?: string;
+  email?: string;
+}
+
 export default function ProjectForm() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [_searchParams] = useSearchParams();
   const [currentSection, setCurrentSection] = useState('basics');
-  const [submitError, setSubmitError] = useState(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Track which action is currently loading
-  const [loadingAction, setLoadingAction] = useState(null);
+  const [loadingAction, setLoadingAction] = useState<LoadingActionType>(null);
 
   // Draft management state
-  const [currentDraftId, setCurrentDraftId] = useState(null);
-  const [draftStatus, setDraftStatus] = useState(null);
-  const [draftShareToken, setDraftShareToken] = useState(null);
+  const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
+  const [draftStatus, setDraftStatus] = useState<DraftStatus | null>(null);
+  const [draftShareToken, setDraftShareToken] = useState<string | null>(null);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [isShareLoading, setIsShareLoading] = useState(false);
-  const [draftMessage, setDraftMessage] = useState(null);
+  const [draftMessage, setDraftMessage] = useState<DraftMessage | null>(null);
 
   // Track created resources
-  const [createdResources, setCreatedResources] = useState(() => {
+  const [createdResources, setCreatedResources] = useState<CreatedResources>(() => {
     const saved = localStorage.getItem(CREATED_RESOURCES_KEY);
     if (saved) {
       try {
-        return JSON.parse(saved);
-      } catch (e) {
+        return JSON.parse(saved) as CreatedResources;
+      } catch {
         return {};
       }
     }
@@ -87,7 +112,7 @@ export default function ProjectForm() {
   });
 
   // Save created resources to localStorage
-  const updateCreatedResources = (updates) => {
+  const updateCreatedResources = (updates: Partial<CreatedResources>): void => {
     setCreatedResources((prev) => {
       const next = { ...prev, ...updates };
       localStorage.setItem(CREATED_RESOURCES_KEY, JSON.stringify(next));
@@ -96,7 +121,7 @@ export default function ProjectForm() {
   };
 
   // Clear all created resources (for starting fresh)
-  const clearCreatedResources = () => {
+  const clearCreatedResources = (): void => {
     setCreatedResources({});
     localStorage.removeItem(CREATED_RESOURCES_KEY);
   };
@@ -105,7 +130,7 @@ export default function ProjectForm() {
   const [debugMode, setDebugMode] = useState(false);
 
   // Toggle debug mode
-  const handleToggleDebug = () => {
+  const handleToggleDebug = (): void => {
     if (!debugMode) {
       debugLogger.start();
       debugLogger.log('form', 'Debug session started - form data snapshot', getFormData());
@@ -116,11 +141,11 @@ export default function ProjectForm() {
   };
 
   // Download debug log
-  const handleDownloadDebugLog = () => {
+  const handleDownloadDebugLog = (): void => {
     debugLogger.downloadLogs();
   };
 
-  const connectionStatus = getConnectionStatus();
+  const connectionStatus: ConnectionStatus = getConnectionStatus();
   const isConnected = connectionStatus.airtable;
 
   const { data: teamMembers = [], isLoading: loadingMembers } = useTeamMembers();
@@ -129,28 +154,11 @@ export default function ProjectForm() {
   const {
     register,
     control,
-    handleSubmit,
     watch,
     setValue,
     formState: { errors, isDirty },
-  } = useForm({
-    defaultValues: {
-      projectName: '',
-      projectAcronym: '',
-      startDate: '',
-      endDate: '',
-      description: '',
-      objectives: '',
-      roles: {
-        project_owner: { memberId: '', fte: '' },
-        project_coordinator: { memberId: '', fte: '' },
-        technical_support: { memberId: '', fte: '' },
-        comms_support: { memberId: '', fte: '' },
-        oversight: { memberId: '', fte: '' },
-        other: { memberId: '', fte: '' },
-      },
-      outcomes: [{ name: '', description: '', dueDate: '' }],
-    },
+  } = useForm<FormData>({
+    defaultValues: DEFAULT_FORM_VALUES,
   });
 
   // Outcomes field array
@@ -167,9 +175,9 @@ export default function ProjectForm() {
     const saved = localStorage.getItem(DRAFT_KEY);
     if (saved) {
       try {
-        const draft = JSON.parse(saved);
+        const draft = JSON.parse(saved) as FormData;
         Object.entries(draft).forEach(([key, value]) => {
-          setValue(key, value);
+          setValue(key as keyof FormData, value as FormData[keyof FormData]);
         });
       } catch (e) {
         console.warn('Failed to restore draft:', e);
@@ -212,12 +220,12 @@ export default function ProjectForm() {
   }, []);
 
   // Get current form data
-  const getFormData = () => watchedValues;
+  const getFormData = (): FormData => watchedValues;
 
   // === INDIVIDUAL ACTION HANDLERS ===
 
   // 1. Create Asana Board (from template)
-  const handleCreateAsanaBoard = async () => {
+  const handleCreateAsanaBoard = async (): Promise<void> => {
     const data = getFormData();
     setLoadingAction('asanaBoard');
     setSubmitError(null);
@@ -237,13 +245,13 @@ export default function ProjectForm() {
       // Get Asana users for matching
       const user = await asana.getCurrentUser();
       const workspaceGid = user.workspaces?.[0]?.gid;
-      let asanaUsers = [];
+      let asanaUsers: AsanaUser[] = [];
       if (workspaceGid) {
         asanaUsers = await asana.getWorkspaceUsers(workspaceGid);
       }
 
       // Build role assignments for Asana
-      const asanaRoleAssignments = [];
+      const asanaRoleAssignments: AsanaRoleAssignment[] = [];
       if (coordinatorMember) {
         const match = asana.findBestUserMatch(coordinatorMember.name, asanaUsers);
         if (match?.user?.gid) {
@@ -271,14 +279,14 @@ export default function ProjectForm() {
       const asanaUrl = asana.getProjectUrl(asanaProjectGid);
       updateCreatedResources({ asanaProjectGid, asanaUrl });
     } catch (err) {
-      setSubmitError(`Asana Board: ${err.message}`);
+      setSubmitError(`Asana Board: ${(err as Error).message}`);
     } finally {
       setLoadingAction(null);
     }
   };
 
   // 2. Create Asana Milestone Tickets (from outcomes)
-  const handleCreateAsanaMilestones = async () => {
+  const handleCreateAsanaMilestones = async (): Promise<void> => {
     const data = getFormData();
     setLoadingAction('asanaMilestones');
     setSubmitError(null);
@@ -294,7 +302,7 @@ export default function ProjectForm() {
       }
 
       // Get Project Coordinator's Asana user GID for assignment
-      let coordinatorAsanaGid = null;
+      let coordinatorAsanaGid: string | null = null;
       const coordinatorId = data.roles.project_coordinator?.memberId;
       const coordinatorMember = teamMembers.find(m => m.id === coordinatorId);
 
@@ -330,15 +338,18 @@ export default function ProjectForm() {
 
       updateCreatedResources({ asanaMilestonesCreated: true });
     } catch (err) {
-      setSubmitError(`Asana Milestones: ${err.message}`);
+      setSubmitError(`Asana Milestones: ${(err as Error).message}`);
     } finally {
       setLoadingAction(null);
     }
   };
 
   // Helper function to transform form data with role names for Google templates
-  const transformDataWithRoleNames = (data) => {
-    const transformedData = { ...data, roles: {} };
+  const transformDataWithRoleNames = (data: FormData): FormData & { roles: Record<string, RoleAssignment & { name: string }> } => {
+    const transformedData: FormData & { roles: Record<string, RoleAssignment & { name: string }> } = {
+      ...data,
+      roles: {} as Record<string, RoleAssignment & { name: string }>
+    };
 
     debugLogger.log('form', 'Transform roles - input', {
       rawRoles: data.roles,
@@ -381,7 +392,7 @@ export default function ProjectForm() {
   };
 
   // 3. Create Google Scoping Doc
-  const handleCreateScopingDoc = async () => {
+  const handleCreateScopingDoc = async (): Promise<void> => {
     const data = getFormData();
     setLoadingAction('scopingDoc');
     setSubmitError(null);
@@ -404,7 +415,7 @@ export default function ProjectForm() {
       const folderName = data.projectAcronym || data.projectName;
       let folders = await google.searchDriveFolder(folderName, sharedDriveId, parentFolderId);
 
-      let folderId;
+      let folderId: string;
       if (folders.length > 0) {
         folderId = folders[0].id;
       } else {
@@ -428,15 +439,15 @@ export default function ProjectForm() {
       const scopingDocUrl = google.getDocUrl(doc.id);
       updateCreatedResources({ googleFolderId: folderId, folderUrl, scopingDocId: doc.id, scopingDocUrl });
     } catch (err) {
-      debugLogger.logError('google', 'Failed to create scoping doc', err);
-      setSubmitError(`Scoping Doc: ${err.message}`);
+      debugLogger.logError('google', 'Failed to create scoping doc', err as Error);
+      setSubmitError(`Scoping Doc: ${(err as Error).message}`);
     } finally {
       setLoadingAction(null);
     }
   };
 
   // 4. Create Google Kickoff Deck
-  const handleCreateKickoffDeck = async () => {
+  const handleCreateKickoffDeck = async (): Promise<void> => {
     const data = getFormData();
     setLoadingAction('kickoffDeck');
     setSubmitError(null);
@@ -480,15 +491,15 @@ export default function ProjectForm() {
       const kickoffDeckUrl = google.getSlidesUrl(deck.id);
       updateCreatedResources({ kickoffDeckId: deck.id, kickoffDeckUrl });
     } catch (err) {
-      debugLogger.logError('google', 'Failed to create kickoff deck', err);
-      setSubmitError(`Kickoff Deck: ${err.message}`);
+      debugLogger.logError('google', 'Failed to create kickoff deck', err as Error);
+      setSubmitError(`Kickoff Deck: ${(err as Error).message}`);
     } finally {
       setLoadingAction(null);
     }
   };
 
   // 5. Create Airtable Records (project, milestones, assignments) and populate URLs
-  const handleCreateAirtableRecords = async () => {
+  const handleCreateAirtableRecords = async (): Promise<void> => {
     const data = getFormData();
     setLoadingAction('airtable');
     setSubmitError(null);
@@ -512,7 +523,7 @@ export default function ProjectForm() {
       }
 
       // Create role assignments (with FTE)
-      const roleAssignments = {};
+      const roleAssignments: Record<string, { memberId: string; fte: string }> = {};
       for (const [roleKey, roleData] of Object.entries(data.roles)) {
         if (roleData?.memberId) {
           roleAssignments[roleKey] = {
@@ -526,7 +537,7 @@ export default function ProjectForm() {
       }
 
       // Update project with URLs from other resources
-      const urlUpdates = {};
+      const urlUpdates: Record<string, string> = {};
       const f = airtableProjectFields;
       if (createdResources.asanaUrl) {
         urlUpdates[f.asana_url || 'Asana Board'] = createdResources.asanaUrl;
@@ -546,14 +557,14 @@ export default function ProjectForm() {
       const airtableUrl = `https://airtable.com/${import.meta.env.VITE_AIRTABLE_BASE_ID}/${projectId}`;
       updateCreatedResources({ airtableProjectId: projectId, airtableUrl });
     } catch (err) {
-      setSubmitError(`Airtable: ${err.message}`);
+      setSubmitError(`Airtable: ${(err as Error).message}`);
     } finally {
       setLoadingAction(null);
     }
   };
 
   // Navigate to success page
-  const handleFinish = () => {
+  const handleFinish = (): void => {
     localStorage.removeItem(DRAFT_KEY);
     navigate('/success', {
       state: {
@@ -569,7 +580,7 @@ export default function ProjectForm() {
   // === DRAFT HANDLERS ===
 
   // Save current form as draft
-  const handleSaveDraft = async () => {
+  const handleSaveDraft = async (): Promise<void> => {
     setLoadingAction('saveDraft');
     setDraftMessage(null);
 
@@ -599,27 +610,27 @@ export default function ProjectForm() {
         setDraftMessage({ type: 'success', text: 'Draft saved successfully' });
       }
     } catch (err) {
-      setDraftMessage({ type: 'error', text: err.message });
+      setDraftMessage({ type: 'error', text: (err as Error).message });
     } finally {
       setLoadingAction(null);
     }
   };
 
   // Submit draft for approval
-  const handleShareDraft = async ({ memberId, memberName, email }) => {
+  const handleShareDraft = async ({ memberId, memberName, email }: ShareDraftData): Promise<void> => {
     setIsShareLoading(true);
     setDraftMessage(null);
 
     try {
       // Make sure we have a saved draft first
       if (!currentDraftId) {
-        const userEmail = await getCurrentUserEmail();
-        if (!userEmail) {
+        const teamMemberId = userManager.getTeamMemberId();
+        if (!teamMemberId) {
           throw new Error('Please connect to Airtable first');
         }
 
         const formData = getFormData();
-        const result = await drafts.createDraft(formData, userEmail);
+        const result = await drafts.createDraft(formData, teamMemberId);
         setCurrentDraftId(result.id);
         setDraftShareToken(result.shareToken);
       }
@@ -630,7 +641,7 @@ export default function ProjectForm() {
         throw new Error('Approver email is required');
       }
 
-      await drafts.submitForApproval(currentDraftId, memberId, approverEmail);
+      await drafts.submitForApproval(currentDraftId!, memberId || undefined, approverEmail);
       setDraftStatus('Pending Approval');
       setShareModalOpen(false);
       setDraftMessage({
@@ -638,14 +649,14 @@ export default function ProjectForm() {
         text: `Draft sent to ${memberName || approverEmail} for approval`,
       });
     } catch (err) {
-      setDraftMessage({ type: 'error', text: err.message });
+      setDraftMessage({ type: 'error', text: (err as Error).message });
     } finally {
       setIsShareLoading(false);
     }
   };
 
   // Copy share link to clipboard
-  const handleCopyShareLink = () => {
+  const handleCopyShareLink = (): void => {
     if (!draftShareToken) return;
 
     const shareUrl = `${window.location.origin}/review/${draftShareToken}`;
@@ -655,7 +666,7 @@ export default function ProjectForm() {
     });
   };
 
-  const sections = [
+  const sections: Section[] = [
     { id: 'basics', label: 'Basics' },
     { id: 'description', label: 'Description' },
     { id: 'team', label: 'Team' },
@@ -693,7 +704,7 @@ export default function ProjectForm() {
           </div>
         )}
 
-        <form onSubmit={(e) => e.preventDefault()}>
+        <form onSubmit={(e: FormEvent) => e.preventDefault()}>
           {/* Basics Section */}
           <FormSection id="basics" title="Project Basics" helpFile="project-name.md">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -799,12 +810,12 @@ export default function ProjectForm() {
                     key={role.key}
                     label={role.label}
                     required={role.required}
-                    error={errors.roles?.[role.key]?.memberId}
+                    error={errors.roles?.[role.key as keyof FormData['roles']]?.memberId}
                   >
                     <div className="flex gap-3">
                       <select
                         className="form-input flex-1"
-                        {...register(`roles.${role.key}.memberId`, {
+                        {...register(`roles.${role.key as keyof FormData['roles']}.memberId`, {
                           validate: role.required
                             ? (v) => (v && v.length > 0) || `${role.label} is required`
                             : undefined,
@@ -824,7 +835,7 @@ export default function ProjectForm() {
                         min="0"
                         max="100"
                         step="5"
-                        {...register(`roles.${role.key}.fte`)}
+                        {...register(`roles.${role.key as keyof FormData['roles']}.fte`)}
                       />
                     </div>
                   </FormField>
@@ -867,7 +878,7 @@ export default function ProjectForm() {
                     />
                     {errors.outcomes?.[index]?.name && (
                       <p className="text-sm text-red-600">
-                        {errors.outcomes[index].name.message}
+                        {errors.outcomes[index]?.name?.message}
                       </p>
                     )}
 
@@ -1044,7 +1055,7 @@ export default function ProjectForm() {
                 label="Create Asana Milestone Tickets"
                 onClick={handleCreateAsanaMilestones}
                 isLoading={loadingAction === 'asanaMilestones'}
-                isComplete={createdResources.asanaMilestonesCreated}
+                isComplete={!!createdResources.asanaMilestonesCreated}
                 disabled={!connectionStatus.asana || !createdResources.asanaProjectGid}
               />
 

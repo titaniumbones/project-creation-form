@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect, ChangeEvent } from 'react';
+import { Link } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import { getCurrentUserEmail, getConnectionStatus } from '../services/oauth';
 import * as drafts from '../services/drafts';
+import type { DraftStatus, ConnectionStatus } from '../types';
 import {
   ArrowPathIcon,
   DocumentDuplicateIcon,
@@ -16,16 +17,42 @@ import {
   ChatBubbleLeftIcon,
 } from '@heroicons/react/24/outline';
 
+interface DraftItem {
+  id: string;
+  projectName: string;
+  status: DraftStatus;
+  createdAt?: string;
+  approverNotes?: string;
+  shareToken: string;
+}
+
+interface PendingDraftItem {
+  id: string;
+  projectName: string;
+  status: DraftStatus;
+  createdBy?: string;
+  shareToken: string;
+}
+
+interface Message {
+  type: 'success' | 'error';
+  text: string;
+}
+
 // Status badge component
-function StatusBadge({ status }) {
-  const styles = {
+interface StatusBadgeProps {
+  status: DraftStatus;
+}
+
+function StatusBadge({ status }: StatusBadgeProps) {
+  const styles: Record<string, string> = {
     Draft: 'bg-gray-200 text-gray-700',
     'Pending Approval': 'bg-yellow-200 text-yellow-800',
     Approved: 'bg-green-200 text-green-800',
     'Changes Requested': 'bg-orange-200 text-orange-800',
   };
 
-  const icons = {
+  const icons: Record<string, typeof DocumentDuplicateIcon> = {
     Draft: DocumentDuplicateIcon,
     'Pending Approval': ClockIcon,
     Approved: CheckCircleIcon,
@@ -43,7 +70,13 @@ function StatusBadge({ status }) {
 }
 
 // Draft card component
-function DraftCard({ draft, onDelete, onCopyLink }) {
+interface DraftCardProps {
+  draft: DraftItem;
+  onDelete: (id: string) => Promise<void>;
+  onCopyLink: (shareToken: string) => void;
+}
+
+function DraftCard({ draft, onDelete, onCopyLink }: DraftCardProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
 
@@ -139,15 +172,14 @@ function DraftCard({ draft, onDelete, onCopyLink }) {
 }
 
 export default function MyDrafts() {
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [myDrafts, setMyDrafts] = useState([]);
-  const [pendingApproval, setPendingApproval] = useState([]);
-  const [filter, setFilter] = useState('all');
-  const [message, setMessage] = useState(null);
+  const [error, setError] = useState<string | null>(null);
+  const [myDrafts, setMyDrafts] = useState<DraftItem[]>([]);
+  const [pendingApproval, setPendingApproval] = useState<PendingDraftItem[]>([]);
+  const [filter, setFilter] = useState<string>('all');
+  const [message, setMessage] = useState<Message | null>(null);
 
-  const connectionStatus = getConnectionStatus();
+  const connectionStatus: ConnectionStatus = getConnectionStatus();
 
   // Load drafts on mount
   useEffect(() => {
@@ -170,7 +202,7 @@ export default function MyDrafts() {
         setMyDrafts(userDrafts);
         setPendingApproval(approvalDrafts);
       } catch (err) {
-        setError(err.message);
+        setError((err as Error).message);
       } finally {
         setLoading(false);
       }
@@ -185,19 +217,19 @@ export default function MyDrafts() {
   }, [connectionStatus.airtable]);
 
   // Handle draft deletion
-  const handleDelete = async (draftId) => {
+  const handleDelete = async (draftId: string) => {
     try {
       await drafts.deleteDraft(draftId);
       setMyDrafts(prev => prev.filter(d => d.id !== draftId));
       setMessage({ type: 'success', text: 'Draft deleted' });
       setTimeout(() => setMessage(null), 3000);
     } catch (err) {
-      setMessage({ type: 'error', text: err.message });
+      setMessage({ type: 'error', text: (err as Error).message });
     }
   };
 
   // Copy share link
-  const handleCopyLink = (shareToken) => {
+  const handleCopyLink = (shareToken: string) => {
     const shareUrl = `${window.location.origin}/review/${shareToken}`;
     navigator.clipboard.writeText(shareUrl).then(() => {
       setMessage({ type: 'success', text: 'Link copied to clipboard' });
@@ -323,7 +355,7 @@ export default function MyDrafts() {
                   <span className="text-sm text-gray-500">Filter:</span>
                   <select
                     value={filter}
-                    onChange={(e) => setFilter(e.target.value)}
+                    onChange={(e: ChangeEvent<HTMLSelectElement>) => setFilter(e.target.value)}
                     className="text-sm border border-gray-300 rounded-lg px-2 py-1"
                   >
                     <option value="all">All</option>

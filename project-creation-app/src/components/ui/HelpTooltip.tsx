@@ -3,15 +3,19 @@ import { QuestionMarkCircleIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import ReactMarkdown from 'react-markdown';
 import { useHelpText } from '../../hooks/useHelpText';
 
-export default function HelpTooltip({ helpFile }) {
+interface HelpTooltipProps {
+  helpFile: string;
+}
+
+export default function HelpTooltip({ helpFile }: HelpTooltipProps) {
   const [isOpen, setIsOpen] = useState(false);
   const { content, isLoading } = useHelpText(helpFile);
-  const tooltipRef = useRef(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
 
   // Close on click outside
   useEffect(() => {
-    function handleClickOutside(event) {
-      if (tooltipRef.current && !tooltipRef.current.contains(event.target)) {
+    function handleClickOutside(event: MouseEvent) {
+      if (tooltipRef.current && !tooltipRef.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
     }
@@ -24,7 +28,7 @@ export default function HelpTooltip({ helpFile }) {
 
   // Close on escape key
   useEffect(() => {
-    function handleEscape(event) {
+    function handleEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         setIsOpen(false);
       }

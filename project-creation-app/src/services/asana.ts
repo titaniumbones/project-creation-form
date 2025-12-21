@@ -1,10 +1,49 @@
 // Asana API client
 import { getValidToken } from './oauth';
 import { debugLogger } from './debugLogger';
+import type { AsanaUser, AsanaProject, AsanaUserMatch } from '../types';
 
 const API_URL = 'https://app.asana.com/api/1.0';
 
-async function getAccessToken() {
+interface AsanaRequestOptions {
+  method?: string;
+  body?: string;
+  headers?: Record<string, string>;
+}
+
+interface AsanaTemplate {
+  name: string;
+  requested_dates?: Array<{ gid: string; name: string }>;
+  requested_roles?: Array<{ gid: string; name: string }>;
+}
+
+export interface RoleAssignment {
+  roleName: string;
+  userGid: string;
+}
+
+// Re-export AsanaUser from types for convenience
+export type { AsanaUser } from '../types';
+
+interface TaskData {
+  name: string;
+  description?: string;
+  dueDate?: string;
+}
+
+interface TaskResult {
+  taskGid: string;
+  taskUrl: string;
+}
+
+interface ProjectSearchResult {
+  exists: boolean;
+  existingProject: AsanaProject | null;
+  url: string | null;
+  searchResults: Array<{ name: string; gid: string }>;
+}
+
+async function getAccessToken(): Promise<string> {
   const token = await getValidToken('asana');
   if (!token) {
     throw new Error('Not connected to Asana. Please connect in Settings.');
@@ -12,7 +51,7 @@ async function getAccessToken() {
   return token;
 }
 
-async function asanaRequest(endpoint, options = {}) {
+async function asanaRequest<T = unknown>(endpoint: string, options: AsanaRequestOptions = {}): Promise<T> {
   const token = await getAccessToken();
   const method = options.method || 'GET';
   const payload = options.body ? JSON.parse(options.body) : null;
@@ -41,22 +80,22 @@ async function asanaRequest(endpoint, options = {}) {
 }
 
 // Get current user info (useful for workspace GID)
-export async function getCurrentUser() {
-  return asanaRequest('/users/me?opt_fields=name,email,workspaces');
+export async function getCurrentUser(): Promise<AsanaUser> {
+  return asanaRequest<AsanaUser>('/users/me?opt_fields=name,email,workspaces');
 }
 
 // Get workspace users for role matching
-export async function getWorkspaceUsers(workspaceGid) {
-  return asanaRequest(`/workspaces/${workspaceGid}/users?opt_fields=name,email`);
+export async function getWorkspaceUsers(workspaceGid: string): Promise<AsanaUser[]> {
+  return asanaRequest<AsanaUser[]>(`/workspaces/${workspaceGid}/users?opt_fields=name,email`);
 }
 
 // Get project template details (dates, roles)
-export async function getProjectTemplate(templateGid) {
-  return asanaRequest(`/project_templates/${templateGid}?opt_fields=name,requested_dates,requested_roles`);
+export async function getProjectTemplate(templateGid: string): Promise<AsanaTemplate> {
+  return asanaRequest<AsanaTemplate>(`/project_templates/${templateGid}?opt_fields=name,requested_dates,requested_roles`);
 }
 
 // Format a date to YYYY-MM-DD for Asana API
-function formatDateForAsana(dateValue) {
+function formatDateForAsana(dateValue: string | Date | null | undefined): string | null {
   if (!dateValue) return null;
   if (typeof dateValue === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
     return dateValue;
@@ -67,7 +106,13 @@ function formatDateForAsana(dateValue) {
 }
 
 // Create project from template
-export async function createProjectFromTemplate(templateGid, name, teamGid, startDate = null, roleAssignments = []) {
+export async function createProjectFromTemplate(
+  templateGid: string,
+  name: string,
+  teamGid: string,
+  startDate: string | null = null,
+  roleAssignments: RoleAssignment[] = []
+): Promise<string> {
   // Get template to see what dates and roles are required
   const template = await getProjectTemplate(templateGid);
 
@@ -89,8 +134,14 @@ export async function createProjectFromTemplate(templateGid, name, teamGid, star
   }));
 
   // Build requested_roles by matching template roles to assignments
-  const requestedRoles = [];
-  const roleMatchingResults = [];
+  const requestedRoles: Array<{ gid: string; value: string }> = [];
+  const roleMatchingResults: Array<{
+    templateRole: string;
+    templateRoleGid: string;
+    matchedTo: string | null;
+    userGid: string | null;
+    matched: boolean;
+  }> = [];
 
   for (const templateRole of (template.requested_roles || [])) {
     const templateRoleName = templateRole.name?.toLowerCase() || '';
@@ -129,7 +180,7 @@ export async function createProjectFromTemplate(templateGid, name, teamGid, star
     finalRequestedRoles: requestedRoles,
   });
 
-  const requestBody = {
+  const requestBody: Record<string, unknown> = {
     name: name,
     team: teamGid,
     public: false,
@@ -148,10 +199,13 @@ export async function createProjectFromTemplate(templateGid, name, teamGid, star
     requestBody,
   });
 
-  const result = await asanaRequest(`/project_templates/${templateGid}/instantiateProject`, {
-    method: 'POST',
-    body: JSON.stringify({ data: requestBody }),
-  });
+  const result = await asanaRequest<{ new_project?: { gid: string } }>(
+    `/project_templates/${templateGid}/instantiateProject`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ data: requestBody }),
+    }
+  );
 
   const projectGid = result?.new_project?.gid;
   if (!projectGid) {
@@ -163,7 +217,7 @@ export async function createProjectFromTemplate(templateGid, name, teamGid, star
 }
 
 // Add members to a project
-export async function addProjectMembers(projectGid, memberGids) {
+export async function addProjectMembers(projectGid: string, memberGids: string[]): Promise<boolean> {
   if (!memberGids || memberGids.length === 0) return true;
 
   await asanaRequest(`/projects/${projectGid}/addMembers`, {
@@ -177,8 +231,12 @@ export async function addProjectMembers(projectGid, memberGids) {
 }
 
 // Create a task
-export async function createTask(projectGid, task, assigneeGid = null) {
-  const taskData = {
+export async function createTask(
+  projectGid: string,
+  task: TaskData,
+  assigneeGid: string | null = null
+): Promise<TaskResult> {
+  const taskData: Record<string, unknown> = {
     name: task.name,
     notes: task.description || '',
     due_on: formatDateForAsana(task.dueDate),
@@ -189,7 +247,7 @@ export async function createTask(projectGid, task, assigneeGid = null) {
     taskData.assignee = assigneeGid;
   }
 
-  const result = await asanaRequest('/tasks', {
+  const result = await asanaRequest<{ gid: string }>('/tasks', {
     method: 'POST',
     body: JSON.stringify({ data: taskData }),
   });
@@ -201,13 +259,13 @@ export async function createTask(projectGid, task, assigneeGid = null) {
 }
 
 // Fuzzy match a name against Asana users
-export function findBestUserMatch(searchName, asanaUsers) {
+export function findBestUserMatch(searchName: string, asanaUsers: AsanaUser[]): AsanaUserMatch | null {
   if (!searchName || !asanaUsers?.length) return null;
 
   const searchLower = searchName.toLowerCase().trim();
   const searchParts = searchLower.split(/\s+/);
 
-  let bestMatch = null;
+  let bestMatch: AsanaUserMatch | null = null;
   let bestScore = 0;
 
   for (const user of asanaUsers) {
@@ -216,7 +274,7 @@ export function findBestUserMatch(searchName, asanaUsers) {
 
     // Exact match
     if (userName === searchLower) {
-      return { user, score: 100, matchType: 'exact' };
+      return { user, score: 100 };
     }
 
     // Check if all search parts are contained in user name
@@ -225,7 +283,7 @@ export function findBestUserMatch(searchName, asanaUsers) {
       const score = 80 + (searchParts.length / userParts.length) * 10;
       if (score > bestScore) {
         bestScore = score;
-        bestMatch = { user, score, matchType: 'contains_all' };
+        bestMatch = { user, score };
       }
     }
 
@@ -237,7 +295,7 @@ export function findBestUserMatch(searchName, asanaUsers) {
         const score = 70;
         if (score > bestScore) {
           bestScore = score;
-          bestMatch = { user, score, matchType: 'first_last' };
+          bestMatch = { user, score };
         }
       }
     }
@@ -246,7 +304,7 @@ export function findBestUserMatch(searchName, asanaUsers) {
     const anyPartMatch = searchParts.some((part) => userName.includes(part) && part.length > 2);
     if (anyPartMatch && bestScore < 50) {
       bestScore = 50;
-      bestMatch = { user, score: 50, matchType: 'partial' };
+      bestMatch = { user, score: 50 };
     }
   }
 
@@ -254,15 +312,18 @@ export function findBestUserMatch(searchName, asanaUsers) {
 }
 
 // Get project URL from GID
-export function getProjectUrl(projectGid) {
+export function getProjectUrl(projectGid: string): string {
   return `https://app.asana.com/0/${projectGid}/list`;
 }
 
 // Search for existing project by name (for duplicate checking)
-export async function searchProjectByName(projectName, workspaceGid) {
+export async function searchProjectByName(
+  projectName: string,
+  workspaceGid: string
+): Promise<ProjectSearchResult> {
   debugLogger.log('asana', 'Searching for existing project', { projectName, workspaceGid });
 
-  const results = await asanaRequest(
+  const results = await asanaRequest<AsanaProject[]>(
     `/workspaces/${workspaceGid}/typeahead?resource_type=project&query=${encodeURIComponent(projectName)}&opt_fields=name,permalink_url`
   );
 
@@ -270,7 +331,7 @@ export async function searchProjectByName(projectName, workspaceGid) {
     p.name.toLowerCase() === projectName.toLowerCase()
   );
 
-  const result = {
+  const result: ProjectSearchResult = {
     exists: !!exactMatch,
     existingProject: exactMatch || null,
     url: exactMatch?.permalink_url || null,

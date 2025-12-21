@@ -6,21 +6,36 @@ import {
   PlusIcon,
 } from '@heroicons/react/24/outline';
 
+interface LocationState {
+  projectName?: string;
+  airtableUrl?: string;
+  asanaUrl?: string;
+  driveUrl?: string;
+  deckUrl?: string;
+}
+
+interface ResourceLink {
+  label: string;
+  url: string | undefined;
+  icon: string;
+}
+
 export default function Success() {
   const location = useLocation();
-  const { projectName, airtableUrl, asanaUrl, driveUrl, deckUrl } = location.state || {};
+  const state = (location.state as LocationState) || {};
+  const { projectName, airtableUrl, asanaUrl, driveUrl, deckUrl } = state;
 
   // Redirect if no project data
   if (!projectName) {
     return <Navigate to="/" replace />;
   }
 
-  const links = [
+  const links: ResourceLink[] = [
     { label: 'Airtable Project', url: airtableUrl, icon: '📊' },
     { label: 'Asana Workspace', url: asanaUrl, icon: '✅' },
     { label: 'Google Drive Folder', url: driveUrl, icon: '📁' },
     { label: 'Kick-off Deck', url: deckUrl, icon: '📽️' },
-  ].filter(link => link.url);
+  ].filter((link): link is ResourceLink & { url: string } => !!link.url);
 
   return (
     <div className="min-h-screen bg-gray-50">

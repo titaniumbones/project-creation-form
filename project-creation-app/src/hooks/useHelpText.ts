@@ -2,16 +2,27 @@
 import { useState, useEffect } from 'react';
 
 // Import all help files
-const helpFiles = import.meta.glob('../content/help/*.md', { query: '?raw', import: 'default', eager: true });
-
-// Map filenames to content
-const helpContent = {};
-Object.entries(helpFiles).forEach(([path, content]) => {
-  const filename = path.split('/').pop();
-  helpContent[filename] = content;
+const helpFiles = import.meta.glob<string>('../content/help/*.md', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
 });
 
-export function useHelpText(helpFile) {
+// Map filenames to content
+const helpContent: Record<string, string> = {};
+Object.entries(helpFiles).forEach(([path, content]) => {
+  const filename = path.split('/').pop();
+  if (filename) {
+    helpContent[filename] = content;
+  }
+});
+
+interface HelpTextResult {
+  content: string;
+  isLoading: boolean;
+}
+
+export function useHelpText(helpFile: string | undefined): HelpTextResult {
   const [content, setContent] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 

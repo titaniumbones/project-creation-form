@@ -5,6 +5,8 @@ This roadmap is incomplete and provisional. Some features may be out of scope fo
 
 ## Styling: Apply gt-styles
 
+**On hold pending resolution of [gt-styles #1](https://github.com/Giving-Tuesday/gt-styles/issues/1)**
+
 GivingTuesday maintains a stylesheet for both SASS and tailwind projects at https://github.com/Giving-Tuesday/gt-styles. it can be installed with 
 
 ``` shell
@@ -18,11 +20,15 @@ and added to tailwind projects with
 @import "gt-styles/tailwind/utilities";
 ```
 
-It should be relatively easy to add this to our project.  
+It should be relatively easy to add this to our project.
+
 
 ## Convert to Typescript
 
+**STATUS: Complete in PR** 
+
 Other products in our portfolio all use Typescript. this project should also be ocnverted to Typescript.  
+
 
 ## Use different asana templates for distinct project types
 
@@ -35,6 +41,14 @@ Several project types have well-developed Asana templates with additional projec
 ## Add Auth0 Authentication
 
 The app should use proper authendication based on the GTDVC authentication manager (Auth0) and the self-signup capacity we've recently released.
+
+This gives room for additional features:
+
+- My Projects: Page showing current user's projects
+- My Milestones: Page showing current user's milestones with their status (complete, on time, delayed) 
+
+Such features will require more careful reworkign of some existing features. 
+
 
 ## Evaluate whether this can be combined with our project-tracker-app
 
