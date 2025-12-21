@@ -14,6 +14,7 @@ import { useTeamMembers } from '../hooks/useTeamMembers';
 import { useFunders } from '../hooks/useFunders';
 import { useParentInitiatives } from '../hooks/useParentInitiatives';
 import { useFieldsConfig } from '../hooks/useConfig';
+import { useAsanaTemplateGid } from '../utils/asanaTemplates';
 import { getConnectionStatus, userManager } from '../services/oauth';
 import * as airtable from '../services/airtable';
 import { airtableProjectFields, airtableTables } from '../services/airtable';
@@ -177,6 +178,10 @@ export default function ProjectForm() {
   // Watch form values for draft saving
   const watchedValues = watch();
 
+  // Get dynamic Asana template based on project type
+  const watchedProjectType = watch('projectType');
+  const asanaTemplateGid = useAsanaTemplateGid(watchedProjectType);
+
   // Load draft on mount
   useEffect(() => {
     const saved = localStorage.getItem(DRAFT_KEY);
@@ -238,7 +243,6 @@ export default function ProjectForm() {
     setSubmitError(null);
 
     try {
-      const asanaTemplateGid = import.meta.env.VITE_ASANA_TEMPLATE_GID;
       const asanaTeamGid = import.meta.env.VITE_ASANA_TEAM_GID;
 
       if (!asanaTemplateGid || !asanaTeamGid) {

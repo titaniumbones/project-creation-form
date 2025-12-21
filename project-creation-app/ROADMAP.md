@@ -44,11 +44,14 @@ We need those fields in order to implement the next step, below.
 
 ## Use different asana templates for distinct project types
 
-Several project types have well-developed Asana templates with additional project roles. We should:
+**STATUS: Complete**
 
-1. ensure that there is some minimal consistency across these distinct templates
-2. establish logic within the app that assigns the appropriate template
-3. ensure that the template choices are part of config.toml, so that semi-technical staff can update them during development
+Several project types have well-developed Asana templates with additional project roles. Implementation:
+
+1. Template mappings are configured in `src/config/integrations.toml` under `[asana.templates]`
+2. Logic in `src/utils/asanaTemplates.ts` selects the appropriate template based on Project Type
+3. Any project type without a specific template mapping falls back to `default_template_gid`
+4. Template GIDs are configurable in the TOML config file for semi-technical staff to update
 
 
 
