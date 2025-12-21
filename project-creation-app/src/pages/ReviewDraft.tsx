@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
+import { useParams, Link } from 'react-router-dom';
 import { useForm, useFieldArray } from 'react-hook-form';
 import Header from '../components/layout/Header';
 import {
@@ -22,22 +22,30 @@ import {
   XCircleIcon,
   ChatBubbleLeftIcon,
 } from '@heroicons/react/24/outline';
+import type { FormData, Draft, CreatedResources, ConnectionStatus, RoleAssignment } from '../types';
+import type { AsanaUser, RoleAssignment as AsanaRoleAssignment } from '../services/asana';
+
+type LoadingActionType = 'save' | 'approveCreate' | 'approveReturn' | 'requestReview' | null;
+
+interface ActionMessage {
+  type: 'success' | 'error';
+  text: string;
+}
 
 export default function ReviewDraft() {
-  const { token } = useParams();
-  const navigate = useNavigate();
+  const { token } = useParams<{ token: string }>();
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [draft, setDraft] = useState(null);
-  const [actionMessage, setActionMessage] = useState(null);
-  const [loadingAction, setLoadingAction] = useState(null);
+  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [actionMessage, setActionMessage] = useState<ActionMessage | null>(null);
+  const [loadingAction, setLoadingAction] = useState<LoadingActionType>(null);
   const [showNotesModal, setShowNotesModal] = useState(false);
   const [notes, setNotes] = useState('');
-  const [createdResources, setCreatedResources] = useState({});
+  const [createdResources, setCreatedResources] = useState<CreatedResources>({});
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-  const connectionStatus = getConnectionStatus();
+  const connectionStatus: ConnectionStatus = getConnectionStatus();
   const { data: teamMembers = [], isLoading: loadingMembers } = useTeamMembers();
 
   // Form setup
@@ -47,7 +55,7 @@ export default function ReviewDraft() {
     watch,
     setValue,
     formState: { errors },
-  } = useForm({
+  } = useForm<FormData>({
     defaultValues: DEFAULT_FORM_VALUES,
   });
 
@@ -70,16 +78,16 @@ export default function ReviewDraft() {
     async function loadDraft() {
       try {
         setLoading(true);
-        const draftData = await drafts.getDraftByToken(token);
+        const draftData = await drafts.getDraftByToken(token!);
         setDraft(draftData);
 
         // Populate form with draft data
         const formData = draftData.formData || {};
         Object.entries(formData).forEach(([key, value]) => {
-          setValue(key, value);
+          setValue(key as keyof FormData, value as FormData[keyof FormData]);
         });
       } catch (err) {
-        setError(err.message);
+        setError((err as Error).message);
       } finally {
         setLoading(false);
       }
@@ -91,22 +99,22 @@ export default function ReviewDraft() {
   }, [token, setValue]);
 
   // Get current form data
-  const getFormData = () => watchedValues;
+  const getFormData = (): FormData => watchedValues;
 
   // Save current form changes to draft
-  const saveFormChanges = async () => {
+  const saveFormChanges = async (): Promise<boolean> => {
     try {
-      await drafts.updateDraftFormData(draft.id, getFormData());
+      await drafts.updateDraftFormData(draft!.id, getFormData());
       setHasUnsavedChanges(false);
       return true;
     } catch (err) {
-      setActionMessage({ type: 'error', text: `Failed to save changes: ${err.message}` });
+      setActionMessage({ type: 'error', text: `Failed to save changes: ${(err as Error).message}` });
       return false;
     }
   };
 
   // Manual save button handler
-  const handleSaveChanges = async () => {
+  const handleSaveChanges = async (): Promise<void> => {
     setLoadingAction('save');
     const success = await saveFormChanges();
     if (success) {
@@ -116,8 +124,11 @@ export default function ReviewDraft() {
   };
 
   // Helper function to transform form data with role names for Google templates
-  const transformDataWithRoleNames = (data) => {
-    const transformedData = { ...data, roles: {} };
+  const transformDataWithRoleNames = (data: FormData): FormData & { roles: Record<string, RoleAssignment & { name: string }> } => {
+    const transformedData: FormData & { roles: Record<string, RoleAssignment & { name: string }> } = {
+      ...data,
+      roles: {} as Record<string, RoleAssignment & { name: string }>
+    };
 
     for (const [roleKey, roleData] of Object.entries(data.roles || {})) {
       if (roleData?.memberId) {
@@ -133,7 +144,7 @@ export default function ReviewDraft() {
   };
 
   // Approve and create all resources
-  const handleApproveAndCreate = async () => {
+  const handleApproveAndCreate = async (): Promise<void> => {
     setLoadingAction('approveCreate');
     setActionMessage(null);
 
@@ -142,7 +153,7 @@ export default function ReviewDraft() {
       await saveFormChanges();
 
       // Mark as approved
-      await drafts.approveDraft(draft.id, 'Approved and resources created by reviewer');
+      await drafts.approveDraft(draft!.id, 'Approved and resources created by reviewer');
 
       const data = getFormData();
 
@@ -153,12 +164,12 @@ export default function ReviewDraft() {
       if (asanaTemplateGid && asanaTeamGid && connectionStatus.asana) {
         const user = await asana.getCurrentUser();
         const workspaceGid = user.workspaces?.[0]?.gid;
-        let asanaUsers = [];
+        let asanaUsers: AsanaUser[] = [];
         if (workspaceGid) {
           asanaUsers = await asana.getWorkspaceUsers(workspaceGid);
         }
 
-        const asanaRoleAssignments = [];
+        const asanaRoleAssignments: AsanaRoleAssignment[] = [];
         const coordinatorId = data.roles.project_coordinator?.memberId;
         const coordinatorMember = teamMembers.find(m => m.id === coordinatorId);
         if (coordinatorMember) {
@@ -199,7 +210,7 @@ export default function ReviewDraft() {
         const folderName = data.projectAcronym || data.projectName;
         let folders = await google.searchDriveFolder(folderName, sharedDriveId, parentFolderId);
 
-        let folderId;
+        let folderId: string;
         if (folders.length > 0) {
           folderId = folders[0].id;
         } else {
@@ -249,7 +260,7 @@ export default function ReviewDraft() {
           await airtable.createMilestones(projectId, validOutcomes);
         }
 
-        const roleAssignments = {};
+        const roleAssignments: Record<string, { memberId: string; fte: string }> = {};
         for (const [roleKey, roleData] of Object.entries(data.roles)) {
           if (roleData?.memberId) {
             roleAssignments[roleKey] = {
@@ -271,34 +282,34 @@ export default function ReviewDraft() {
         text: 'All resources created successfully! Draft approved.',
       });
     } catch (err) {
-      setActionMessage({ type: 'error', text: err.message });
+      setActionMessage({ type: 'error', text: (err as Error).message });
     } finally {
       setLoadingAction(null);
     }
   };
 
   // Approve and return to coordinator
-  const handleApproveAndReturn = async () => {
+  const handleApproveAndReturn = async (): Promise<void> => {
     setLoadingAction('approveReturn');
     try {
       // Save any form changes first
       await saveFormChanges();
 
-      await drafts.approveDraft(draft.id, 'Approved by reviewer - coordinator to create resources');
+      await drafts.approveDraft(draft!.id, 'Approved by reviewer - coordinator to create resources');
       setActionMessage({
         type: 'success',
         text: 'Draft approved! The coordinator has been notified to create resources.',
       });
-      setDraft(prev => ({ ...prev, status: 'Approved' }));
+      setDraft(prev => prev ? { ...prev, status: 'Approved' } : null);
     } catch (err) {
-      setActionMessage({ type: 'error', text: err.message });
+      setActionMessage({ type: 'error', text: (err as Error).message });
     } finally {
       setLoadingAction(null);
     }
   };
 
   // Request further review - save changes and send back to coordinator
-  const handleRequestFurtherReview = async () => {
+  const handleRequestFurtherReview = async (): Promise<void> => {
     if (!notes.trim()) {
       setActionMessage({ type: 'error', text: 'Please provide feedback notes' });
       return;
@@ -309,16 +320,16 @@ export default function ReviewDraft() {
       // Save any form changes first
       await saveFormChanges();
 
-      await drafts.requestChanges(draft.id, notes);
+      await drafts.requestChanges(draft!.id, notes);
       setActionMessage({
         type: 'success',
         text: 'Feedback sent. The coordinator has been notified to review your changes.',
       });
-      setDraft(prev => ({ ...prev, status: 'Changes Requested' }));
+      setDraft(prev => prev ? { ...prev, status: 'Changes Requested' } : null);
       setShowNotesModal(false);
       setNotes('');
     } catch (err) {
-      setActionMessage({ type: 'error', text: err.message });
+      setActionMessage({ type: 'error', text: (err as Error).message });
     } finally {
       setLoadingAction(null);
     }
@@ -426,7 +437,7 @@ export default function ReviewDraft() {
         )}
 
         {/* Form Content */}
-        <form onSubmit={(e) => e.preventDefault()}>
+        <form onSubmit={(e: FormEvent) => e.preventDefault()}>
           {/* Basics Section */}
           <FormSection id="basics" title="Project Basics">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -650,7 +661,7 @@ export default function ReviewDraft() {
               </p>
               <textarea
                 value={notes}
-                onChange={(e) => setNotes(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setNotes(e.target.value)}
                 placeholder="Enter your notes..."
                 className="form-input min-h-[150px] mb-4"
               />

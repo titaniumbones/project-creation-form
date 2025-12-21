@@ -2,41 +2,49 @@
 // Enable debug mode in the UI to capture requests, responses, and data transformations
 // Download the log as JSON for inspection
 
-class DebugLogger {
-  constructor() {
-    this.enabled = false;
-    this.logs = [];
-    this.startTime = null;
-  }
+import type { DebugLog, DebugCategory } from '../types';
 
-  start() {
+interface LogExport {
+  version: string;
+  exportedAt: string;
+  sessionDuration: number;
+  logCount: number;
+  logs: DebugLog[];
+}
+
+class DebugLogger {
+  private enabled: boolean = false;
+  private logs: DebugLog[] = [];
+  private startTime: number | null = null;
+
+  start(): void {
     this.enabled = true;
     this.logs = [];
     this.startTime = Date.now();
     this.log('session', 'Debug session started');
   }
 
-  stop() {
+  stop(): void {
     this.log('session', 'Debug session ended', {
-      duration: Date.now() - this.startTime,
+      duration: Date.now() - (this.startTime || 0),
       totalLogs: this.logs.length,
     });
     this.enabled = false;
   }
 
-  log(category, message, data = null) {
+  log(category: DebugCategory, message: string, data: unknown = null): void {
     if (!this.enabled) return;
 
     this.logs.push({
       timestamp: Date.now(),
-      elapsed: Date.now() - this.startTime,
-      category, // 'form', 'airtable', 'asana', 'google', 'transform', 'error', 'session'
+      elapsed: Date.now() - (this.startTime || 0),
+      category,
       message,
-      data: data ? JSON.parse(JSON.stringify(data)) : null, // Deep clone to avoid mutations
+      data: data ? JSON.parse(JSON.stringify(data)) : undefined,
     });
   }
 
-  logApiRequest(service, endpoint, method, payload) {
+  logApiRequest(service: DebugCategory, endpoint: string, method: string, payload: unknown): void {
     this.log(service, `API Request: ${method} ${endpoint}`, {
       type: 'request',
       method,
@@ -45,7 +53,7 @@ class DebugLogger {
     });
   }
 
-  logApiResponse(service, endpoint, response, error = null) {
+  logApiResponse(service: DebugCategory, endpoint: string, response: unknown, error: Error | null = null): void {
     this.log(service, `API Response: ${endpoint}`, {
       type: 'response',
       endpoint,
@@ -55,14 +63,14 @@ class DebugLogger {
     });
   }
 
-  logTransform(from, to, beforeData, afterData) {
+  logTransform(from: string, to: string, beforeData: unknown, afterData: unknown): void {
     this.log('transform', `Data transform: ${from} -> ${to}`, {
       before: beforeData,
       after: afterData,
     });
   }
 
-  logError(category, message, error, context = null) {
+  logError(category: DebugCategory, message: string, error: Error, context: unknown = null): void {
     this.log('error', `[${category}] ${message}`, {
       error: {
         message: error.message,
@@ -72,7 +80,7 @@ class DebugLogger {
     });
   }
 
-  getLogs() {
+  getLogs(): LogExport {
     return {
       version: '1.0',
       exportedAt: new Date().toISOString(),
@@ -82,7 +90,7 @@ class DebugLogger {
     };
   }
 
-  downloadLogs() {
+  downloadLogs(): void {
     const data = this.getLogs();
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -95,11 +103,11 @@ class DebugLogger {
     URL.revokeObjectURL(url);
   }
 
-  isEnabled() {
+  isEnabled(): boolean {
     return this.enabled;
   }
 
-  getLogCount() {
+  getLogCount(): number {
     return this.logs.length;
   }
 }

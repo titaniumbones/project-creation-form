@@ -1,11 +1,26 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, FormEvent, ChangeEvent } from 'react';
 import { XMarkIcon, PaperAirplaneIcon } from '@heroicons/react/24/outline';
+import type { TeamMember } from '../../types';
 
-export default function ShareDraftModal({ isOpen, onClose, onSubmit, teamMembers, isLoading }) {
+interface ShareDraftModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (data: { email?: string; memberId?: string | null; memberName?: string }) => void;
+  teamMembers: TeamMember[];
+  isLoading: boolean;
+}
+
+export default function ShareDraftModal({
+  isOpen,
+  onClose,
+  onSubmit,
+  teamMembers,
+  isLoading,
+}: ShareDraftModalProps) {
   const [selectedMember, setSelectedMember] = useState('');
   const [customEmail, setCustomEmail] = useState('');
   const [useCustomEmail, setUseCustomEmail] = useState(false);
-  const modalRef = useRef(null);
+  const modalRef = useRef<HTMLDivElement>(null);
 
   // Reset form when modal opens
   useEffect(() => {
@@ -18,8 +33,8 @@ export default function ShareDraftModal({ isOpen, onClose, onSubmit, teamMembers
 
   // Close on click outside
   useEffect(() => {
-    function handleClickOutside(event) {
-      if (modalRef.current && !modalRef.current.contains(event.target)) {
+    function handleClickOutside(event: MouseEvent) {
+      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
         onClose();
       }
     }
@@ -32,7 +47,7 @@ export default function ShareDraftModal({ isOpen, onClose, onSubmit, teamMembers
 
   // Close on escape key
   useEffect(() => {
-    function handleEscape(event) {
+    function handleEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         onClose();
       }
@@ -44,7 +59,7 @@ export default function ShareDraftModal({ isOpen, onClose, onSubmit, teamMembers
     }
   }, [isOpen, onClose]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     if (useCustomEmail) {
@@ -97,7 +112,7 @@ export default function ShareDraftModal({ isOpen, onClose, onSubmit, teamMembers
             </label>
             <select
               value={selectedMember}
-              onChange={(e) => {
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => {
                 setSelectedMember(e.target.value);
                 setUseCustomEmail(false);
               }}
@@ -129,7 +144,7 @@ export default function ShareDraftModal({ isOpen, onClose, onSubmit, teamMembers
               <input
                 type="checkbox"
                 checked={useCustomEmail}
-                onChange={(e) => {
+                onChange={(e: ChangeEvent<HTMLInputElement>) => {
                   setUseCustomEmail(e.target.checked);
                   if (e.target.checked) {
                     setSelectedMember('');
@@ -143,7 +158,7 @@ export default function ShareDraftModal({ isOpen, onClose, onSubmit, teamMembers
               <input
                 type="email"
                 value={customEmail}
-                onChange={(e) => setCustomEmail(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setCustomEmail(e.target.value)}
                 placeholder="approver@example.com"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 required={useCustomEmail}
@@ -160,7 +175,7 @@ export default function ShareDraftModal({ isOpen, onClose, onSubmit, teamMembers
               <input
                 type="email"
                 value={customEmail}
-                onChange={(e) => setCustomEmail(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setCustomEmail(e.target.value)}
                 placeholder="Enter their email address"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 required
@@ -182,7 +197,7 @@ export default function ShareDraftModal({ isOpen, onClose, onSubmit, teamMembers
             </button>
             <button
               type="submit"
-              disabled={isLoading || (!selectedMember && !useCustomEmail) || (selectedMember && !customEmail) || (useCustomEmail && !customEmail)}
+              disabled={isLoading || (!selectedMember && !useCustomEmail) || (!!selectedMember && !customEmail) || (useCustomEmail && !customEmail)}
               className="flex-1 px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
             >
               {isLoading ? (

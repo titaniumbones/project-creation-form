@@ -2,8 +2,73 @@
 import { getValidToken } from './oauth';
 import { debugLogger } from './debugLogger';
 import { googlePlaceholders } from '../config';
+import type { GoogleFile, TeamMember, Outcome, RoleAssignment } from '../types';
 
-async function getAccessToken() {
+interface GoogleDocElement {
+  paragraph?: {
+    elements?: Array<{
+      textRun?: {
+        content?: string;
+      };
+      startIndex: number;
+      endIndex: number;
+    }>;
+  };
+  table?: {
+    tableRows?: Array<{
+      tableCells?: Array<{
+        content?: GoogleDocElement[];
+      }>;
+    }>;
+  };
+  startIndex: number;
+  endIndex: number;
+}
+
+interface GoogleDoc {
+  body?: {
+    content?: GoogleDocElement[];
+  };
+}
+
+interface TableElement {
+  table: {
+    tableRows?: Array<{
+      tableCells?: Array<{
+        content?: Array<{
+          paragraph?: {
+            elements?: Array<{
+              textRun?: {
+                content?: string;
+              };
+              startIndex: number;
+              endIndex: number;
+            }>;
+          };
+        }>;
+      }>;
+    }>;
+  };
+  startIndex: number;
+  endIndex: number;
+}
+
+interface RoleData extends RoleAssignment {
+  name?: string;
+}
+
+interface ProjectDataForGoogle {
+  projectName?: string;
+  projectAcronym?: string;
+  description?: string;
+  objectives?: string;
+  startDate?: string;
+  endDate?: string;
+  outcomes?: Outcome[];
+  roles?: Record<string, RoleData>;
+}
+
+async function getAccessToken(): Promise<string> {
   const token = await getValidToken('google');
   if (!token) {
     throw new Error('Not connected to Google. Please connect in Settings.');
@@ -12,7 +77,11 @@ async function getAccessToken() {
 }
 
 // Search for a folder in Google Drive by name
-export async function searchDriveFolder(folderName, sharedDriveId = null, parentFolderId = null) {
+export async function searchDriveFolder(
+  folderName: string,
+  sharedDriveId: string | null = null,
+  parentFolderId: string | null = null
+): Promise<GoogleFile[]> {
   const token = await getAccessToken();
 
   let query = `name='${folderName.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
@@ -47,10 +116,14 @@ export async function searchDriveFolder(folderName, sharedDriveId = null, parent
 }
 
 // Create a folder in Google Drive
-export async function createDriveFolder(folderName, sharedDriveId = null, parentFolderId = null) {
+export async function createDriveFolder(
+  folderName: string,
+  sharedDriveId: string | null = null,
+  parentFolderId: string | null = null
+): Promise<GoogleFile> {
   const token = await getAccessToken();
 
-  const metadata = {
+  const metadata: Record<string, unknown> = {
     name: folderName,
     mimeType: 'application/vnd.google-apps.folder',
   };
@@ -79,7 +152,11 @@ export async function createDriveFolder(folderName, sharedDriveId = null, parent
 }
 
 // Copy a Google Doc/Slides template
-export async function copyTemplate(templateId, destinationFolderId, newName) {
+export async function copyTemplate(
+  templateId: string,
+  destinationFolderId: string,
+  newName: string
+): Promise<GoogleFile> {
   const token = await getAccessToken();
 
   debugLogger.logApiRequest('google', `/drive/v3/files/${templateId}/copy`, 'POST', {
@@ -111,7 +188,10 @@ export async function copyTemplate(templateId, destinationFolderId, newName) {
 }
 
 // Populate a Google Doc with placeholder replacements
-export async function populateDoc(documentId, replacements) {
+export async function populateDoc(
+  documentId: string,
+  replacements: Record<string, string>
+): Promise<unknown> {
   const token = await getAccessToken();
 
   const requests = Object.entries(replacements).map(([placeholder, value]) => ({
@@ -154,7 +234,10 @@ export async function populateDoc(documentId, replacements) {
 }
 
 // Populate a Google Slides presentation with placeholder replacements
-export async function populateSlides(presentationId, replacements) {
+export async function populateSlides(
+  presentationId: string,
+  replacements: Record<string, string>
+): Promise<unknown> {
   const token = await getAccessToken();
 
   const requests = Object.entries(replacements).map(([placeholder, value]) => ({
@@ -197,7 +280,7 @@ export async function populateSlides(presentationId, replacements) {
 }
 
 // Get a Google Doc's content (to find placeholder locations)
-async function getDocument(documentId) {
+async function getDocument(documentId: string): Promise<GoogleDoc> {
   const token = await getAccessToken();
 
   const response = await fetch(`https://docs.googleapis.com/v1/documents/${documentId}`, {
@@ -213,7 +296,7 @@ async function getDocument(documentId) {
 }
 
 // Find a placeholder's start index in the document
-function findPlaceholderIndex(doc, placeholder) {
+function findPlaceholderIndex(doc: GoogleDoc, placeholder: string): number {
   const content = doc.body?.content || [];
 
   for (const element of content) {
@@ -250,7 +333,12 @@ function findPlaceholderIndex(doc, placeholder) {
 }
 
 // Insert a table at a placeholder location in a Google Doc
-export async function insertTableAtPlaceholder(documentId, placeholder, tableData, headers) {
+export async function insertTableAtPlaceholder(
+  documentId: string,
+  placeholder: string,
+  tableData: string[][],
+  headers: string[]
+): Promise<{ rows: number; cols: number } | null> {
   const token = await getAccessToken();
 
   // Get document to find placeholder location
@@ -266,7 +354,7 @@ export async function insertTableAtPlaceholder(documentId, placeholder, tableDat
   const numCols = headers.length;
 
   // Build requests: delete placeholder, insert table, populate cells
-  const requests = [];
+  const requests: unknown[] = [];
 
   // 1. Delete the placeholder text
   requests.push({
@@ -331,7 +419,7 @@ export async function insertTableAtPlaceholder(documentId, placeholder, tableDat
   const tableStartIndex = tableElement.startIndex;
 
   // STEP 1: Apply cell styling (background colors, padding) - order doesn't matter
-  const styleRequests = [];
+  const styleRequests: unknown[] = [];
 
   // Style header cells
   for (let col = 0; col < numCols; col++) {
@@ -402,37 +490,41 @@ export async function insertTableAtPlaceholder(documentId, placeholder, tableDat
   }
 
   // STEP 2: Insert all text (in reverse order to maintain indices)
-  const textRequests = [];
+  const textRequests: Array<{ insertText: { location: { index: number }; text: string } }> = [];
 
   // Collect header text insertions
-  const headerRow = tableElement.table.tableRows[0];
-  for (let col = 0; col < headers.length; col++) {
-    const cell = headerRow.tableCells[col];
-    const cellIndex = getCellInsertIndex(cell);
-    if (cellIndex !== null) {
-      textRequests.push({
-        insertText: {
-          location: { index: cellIndex },
-          text: headers[col],
-        },
-      });
+  const headerRow = tableElement.table.tableRows?.[0];
+  if (headerRow) {
+    for (let col = 0; col < headers.length; col++) {
+      const cell = headerRow.tableCells?.[col];
+      const cellIndex = getCellInsertIndex(cell);
+      if (cellIndex !== null) {
+        textRequests.push({
+          insertText: {
+            location: { index: cellIndex },
+            text: headers[col],
+          },
+        });
+      }
     }
   }
 
   // Collect data text insertions
   for (let row = 0; row < tableData.length; row++) {
-    const tableRow = tableElement.table.tableRows[row + 1];
-    for (let col = 0; col < headers.length; col++) {
-      const cell = tableRow.tableCells[col];
-      const cellIndex = getCellInsertIndex(cell);
-      const cellValue = tableData[row][col] || '';
-      if (cellIndex !== null && cellValue) {
-        textRequests.push({
-          insertText: {
-            location: { index: cellIndex },
-            text: cellValue,
-          },
-        });
+    const tableRow = tableElement.table.tableRows?.[row + 1];
+    if (tableRow) {
+      for (let col = 0; col < headers.length; col++) {
+        const cell = tableRow.tableCells?.[col];
+        const cellIndex = getCellInsertIndex(cell);
+        const cellValue = tableData[row][col] || '';
+        if (cellIndex !== null && cellValue) {
+          textRequests.push({
+            insertText: {
+              location: { index: cellIndex },
+              text: cellValue,
+            },
+          });
+        }
       }
     }
   }
@@ -462,50 +554,54 @@ export async function insertTableAtPlaceholder(documentId, placeholder, tableDat
   const formattedTable = findTableNearIndex(formattedDoc, placeholderIndex, numRows, numCols);
 
   if (formattedTable) {
-    const formatRequests = [];
+    const formatRequests: unknown[] = [];
 
     // Format header text (bold, white)
-    const fmtHeaderRow = formattedTable.table.tableRows[0];
-    for (let col = 0; col < headers.length; col++) {
-      const cell = fmtHeaderRow.tableCells[col];
-      const content = cell?.content?.[0]?.paragraph?.elements?.[0];
-      if (content?.textRun?.content?.trim()) {
-        formatRequests.push({
-          updateTextStyle: {
-            range: {
-              startIndex: content.startIndex,
-              endIndex: content.endIndex - 1, // Exclude trailing newline
-            },
-            textStyle: {
-              bold: true,
-              foregroundColor: { color: { rgbColor: headerTextColor } },
-            },
-            fields: 'bold,foregroundColor',
-          },
-        });
-      }
-    }
-
-    // Format data text (ensure black color)
-    for (let row = 0; row < tableData.length; row++) {
-      const fmtDataRow = formattedTable.table.tableRows[row + 1];
-      for (let col = 0; col < numCols; col++) {
-        const cell = fmtDataRow?.tableCells?.[col];
+    const fmtHeaderRow = formattedTable.table.tableRows?.[0];
+    if (fmtHeaderRow) {
+      for (let col = 0; col < headers.length; col++) {
+        const cell = fmtHeaderRow.tableCells?.[col];
         const content = cell?.content?.[0]?.paragraph?.elements?.[0];
         if (content?.textRun?.content?.trim()) {
           formatRequests.push({
             updateTextStyle: {
               range: {
                 startIndex: content.startIndex,
-                endIndex: content.endIndex - 1,
+                endIndex: content.endIndex - 1, // Exclude trailing newline
               },
               textStyle: {
-                bold: false,
-                foregroundColor: { color: { rgbColor: dataTextColor } },
+                bold: true,
+                foregroundColor: { color: { rgbColor: headerTextColor } },
               },
               fields: 'bold,foregroundColor',
             },
           });
+        }
+      }
+    }
+
+    // Format data text (ensure black color)
+    for (let row = 0; row < tableData.length; row++) {
+      const fmtDataRow = formattedTable.table.tableRows?.[row + 1];
+      if (fmtDataRow) {
+        for (let col = 0; col < numCols; col++) {
+          const cell = fmtDataRow.tableCells?.[col];
+          const content = cell?.content?.[0]?.paragraph?.elements?.[0];
+          if (content?.textRun?.content?.trim()) {
+            formatRequests.push({
+              updateTextStyle: {
+                range: {
+                  startIndex: content.startIndex,
+                  endIndex: content.endIndex - 1,
+                },
+                textStyle: {
+                  bold: false,
+                  foregroundColor: { color: { rgbColor: dataTextColor } },
+                },
+                fields: 'bold,foregroundColor',
+              },
+            });
+          }
         }
       }
     }
@@ -532,9 +628,21 @@ export async function insertTableAtPlaceholder(documentId, placeholder, tableDat
 }
 
 // Find a table near a given index with expected dimensions
-function findTableNearIndex(doc, targetIndex, expectedRows = null, expectedCols = null) {
+function findTableNearIndex(
+  doc: GoogleDoc,
+  targetIndex: number,
+  expectedRows: number | null = null,
+  expectedCols: number | null = null
+): TableElement | null {
   const content = doc.body?.content || [];
-  const tables = [];
+  const tables: Array<{
+    element: TableElement;
+    startIndex: number;
+    endIndex: number;
+    numRows: number;
+    numCols: number;
+    distance: number;
+  }> = [];
 
   // Collect all tables with their positions
   for (const element of content) {
@@ -542,7 +650,7 @@ function findTableNearIndex(doc, targetIndex, expectedRows = null, expectedCols 
       const numRows = element.table.tableRows?.length || 0;
       const numCols = element.table.tableRows?.[0]?.tableCells?.length || 0;
       tables.push({
-        element,
+        element: element as TableElement,
         startIndex: element.startIndex,
         endIndex: element.endIndex,
         numRows,
@@ -595,7 +703,17 @@ function findTableNearIndex(doc, targetIndex, expectedRows = null, expectedCols 
 }
 
 // Get the insert index for a table cell
-function getCellInsertIndex(cell) {
+interface TableCell {
+  content?: Array<{
+    paragraph?: {
+      elements?: Array<{
+        startIndex: number;
+      }>;
+    };
+  }>;
+}
+
+function getCellInsertIndex(cell: TableCell | undefined): number | null {
   const content = cell?.content || [];
   for (const elem of content) {
     if (elem.paragraph?.elements?.[0]) {
@@ -606,8 +724,8 @@ function getCellInsertIndex(cell) {
 }
 
 // Format milestones data for table insertion
-export function buildMilestonesTableData(outcomes) {
-  const formatDate = (dateStr) => {
+export function buildMilestonesTableData(outcomes: Outcome[] | undefined): string[][] {
+  const formatDate = (dateStr: string | undefined): string => {
     if (!dateStr) return 'TBD';
     try {
       return new Date(dateStr).toLocaleDateString('en-US', {
@@ -630,8 +748,11 @@ export function buildMilestonesTableData(outcomes) {
 }
 
 // Format staff/roles data for table insertion
-export function buildStaffTableData(roles, teamMembers) {
-  const roleLabels = {
+export function buildStaffTableData(
+  roles: Record<string, RoleData> | undefined,
+  teamMembers: TeamMember[] | undefined
+): string[][] {
+  const roleLabels: Record<string, string> = {
     project_owner: 'Project Owner',
     project_coordinator: 'Project Coordinator',
     technical_support: 'Technical Support',
@@ -653,7 +774,7 @@ export function buildStaffTableData(roles, teamMembers) {
     return [];
   }
 
-  const staffData = [];
+  const staffData: string[][] = [];
 
   for (const [roleKey, roleData] of Object.entries(roles)) {
     debugLogger.log('google', `Evaluating role: ${roleKey}`, {
@@ -708,7 +829,11 @@ export function buildStaffTableData(roles, teamMembers) {
 }
 
 // Populate a Google Doc with tables for milestones and staff
-export async function populateDocWithTables(documentId, projectData, teamMembers) {
+export async function populateDocWithTables(
+  documentId: string,
+  projectData: ProjectDataForGoogle,
+  teamMembers: TeamMember[] | undefined
+): Promise<void> {
   const p = googlePlaceholders;
 
   // Insert milestones table
@@ -724,7 +849,7 @@ export async function populateDocWithTables(documentId, projectData, teamMembers
         ['Milestone', 'Description', 'Due Date']
       );
     } catch (err) {
-      debugLogger.log('google', `Failed to insert milestones table: ${err.message}`);
+      debugLogger.log('google', `Failed to insert milestones table: ${(err as Error).message}`);
     }
   } else {
     // No milestones - just remove the placeholder
@@ -744,7 +869,7 @@ export async function populateDocWithTables(documentId, projectData, teamMembers
         ['Role', 'Staff', '% FTE']
       );
     } catch (err) {
-      debugLogger.log('google', `Failed to insert staff table: ${err.message}`);
+      debugLogger.log('google', `Failed to insert staff table: ${(err as Error).message}`);
     }
   } else {
     // No staff - just remove the placeholder
@@ -753,24 +878,24 @@ export async function populateDocWithTables(documentId, projectData, teamMembers
 }
 
 // Get Google Doc URL from document ID
-export function getDocUrl(documentId) {
+export function getDocUrl(documentId: string): string {
   return `https://docs.google.com/document/d/${documentId}/edit`;
 }
 
 // Get Google Slides URL from presentation ID
-export function getSlidesUrl(presentationId) {
+export function getSlidesUrl(presentationId: string): string {
   return `https://docs.google.com/presentation/d/${presentationId}/edit`;
 }
 
 // Get Google Drive folder URL
-export function getFolderUrl(folderId) {
+export function getFolderUrl(folderId: string): string {
   return `https://drive.google.com/drive/folders/${folderId}`;
 }
 
 // Build placeholder replacements from project data
 // Uses placeholder values from config/fields.toml [google.placeholders]
-export function buildReplacements(projectData) {
-  const formatDate = (dateStr) => {
+export function buildReplacements(projectData: ProjectDataForGoogle): Record<string, string> {
+  const formatDate = (dateStr: string | undefined): string => {
     if (!dateStr) return 'TBD';
     try {
       return new Date(dateStr).toLocaleDateString('en-US', {
@@ -804,7 +929,7 @@ export function buildReplacements(projectData) {
 
   // Use placeholder values from config, with fallbacks
   const p = googlePlaceholders;
-  const replacements = {
+  const replacements: Record<string, string> = {
     [p.project_name || '{{PROJECT_NAME}}']: projectData.projectName || '',
     [p.project_acronym || '{{PROJECT_ACRONYM}}']: projectData.projectAcronym || '',
     [p.project_description || '{{PROJECT_DESCRIPTION}}']: projectData.description || '',
@@ -820,7 +945,7 @@ export function buildReplacements(projectData) {
   debugLogger.log('google', 'Template replacements prepared', {
     replacements,
     emptyPlaceholders: Object.entries(replacements)
-      .filter(([_, value]) => !value)
+      .filter(([, value]) => !value)
       .map(([key]) => key),
   });
 

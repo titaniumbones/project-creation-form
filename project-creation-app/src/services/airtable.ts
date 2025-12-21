@@ -10,11 +10,46 @@ import {
   airtableProjectDefaults,
   airtableRoleValues,
 } from '../config';
+import type { AirtableRecord, TeamMember, RoleAssignment } from '../types';
 
 const BASE_ID = import.meta.env.VITE_AIRTABLE_BASE_ID;
 const API_URL = 'https://api.airtable.com/v0';
 
-async function getAccessToken() {
+interface GetRecordsOptions {
+  fields?: string[];
+  filterByFormula?: string;
+  sort?: Array<{ field: string; direction?: 'asc' | 'desc' }>;
+  maxRecords?: number;
+}
+
+interface AirtableRequestOptions {
+  method?: string;
+  body?: string;
+  headers?: Record<string, string>;
+}
+
+interface ProjectData {
+  name: string;
+  acronym?: string;
+  description?: string;
+  objectives?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+interface MilestoneData {
+  name: string;
+  description?: string;
+  dueDate?: string;
+}
+
+interface ProjectExistsResult {
+  exists: boolean;
+  existingRecord: AirtableRecord | null;
+  url: string | null;
+}
+
+async function getAccessToken(): Promise<string> {
   const token = await getValidToken('airtable');
   if (!token) {
     throw new Error('Not connected to Airtable. Please connect in Settings.');
@@ -22,7 +57,7 @@ async function getAccessToken() {
   return token;
 }
 
-async function airtableRequest(endpoint, options = {}) {
+async function airtableRequest(endpoint: string, options: AirtableRequestOptions = {}): Promise<unknown> {
   const token = await getAccessToken();
   const method = options.method || 'GET';
   const payload = options.body ? JSON.parse(options.body) : null;
@@ -51,7 +86,7 @@ async function airtableRequest(endpoint, options = {}) {
 }
 
 // Get records from a table
-export async function getRecords(tableName, options = {}) {
+export async function getRecords(tableName: string, options: GetRecordsOptions = {}): Promise<AirtableRecord[]> {
   const params = new URLSearchParams();
 
   if (options.fields) {
@@ -67,18 +102,18 @@ export async function getRecords(tableName, options = {}) {
     });
   }
   if (options.maxRecords) {
-    params.set('maxRecords', options.maxRecords);
+    params.set('maxRecords', String(options.maxRecords));
   }
 
   const queryString = params.toString();
   const endpoint = `${encodeURIComponent(tableName)}${queryString ? `?${queryString}` : ''}`;
 
-  const data = await airtableRequest(endpoint);
+  const data = await airtableRequest(endpoint) as { records?: AirtableRecord[] };
   return data.records || [];
 }
 
 // Get team members for role assignment
-export async function getTeamMembers() {
+export async function getTeamMembers(): Promise<TeamMember[]> {
   const tableName = airtableTables.team_members || 'Data Team Members';
   const nameField = airtableTeamMembersFields.name || 'Full Name';
 
@@ -89,12 +124,12 @@ export async function getTeamMembers() {
 
   return records.map(r => ({
     id: r.id,
-    name: r.fields[nameField],
+    name: r.fields[nameField] as string,
   }));
 }
 
 // Create a project record
-export async function createProject(projectData) {
+export async function createProject(projectData: ProjectData): Promise<AirtableRecord> {
   const tableName = airtableTables.projects || 'Projects';
   const f = airtableProjectFields;
   const defaults = airtableProjectDefaults;
@@ -106,7 +141,7 @@ export async function createProject(projectData) {
     defaults,
   });
 
-  const fields = {
+  const fields: Record<string, unknown> = {
     [f.name || 'Project']: projectData.name,
     [f.acronym || 'Project Acronym']: projectData.acronym || '',
     [f.description || 'Project Description']: projectData.description || '',
@@ -133,23 +168,23 @@ export async function createProject(projectData) {
     body: JSON.stringify({ fields }),
   });
 
-  return data;
+  return data as AirtableRecord;
 }
 
 // Create milestone records linked to a project
-export async function createMilestones(projectId, milestones) {
+export async function createMilestones(projectId: string, milestones: MilestoneData[]): Promise<AirtableRecord[]> {
   if (!milestones || milestones.length === 0) return [];
 
   const tableName = airtableTables.milestones || 'Milestones';
   const f = airtableMilestoneFields;
 
   // Airtable batch create (max 10 per request)
-  const batches = [];
+  const batches: MilestoneData[][] = [];
   for (let i = 0; i < milestones.length; i += 10) {
     batches.push(milestones.slice(i, i + 10));
   }
 
-  const results = [];
+  const results: AirtableRecord[] = [];
   for (const batch of batches) {
     const records = batch.map(m => ({
       fields: {
@@ -163,7 +198,7 @@ export async function createMilestones(projectId, milestones) {
     const data = await airtableRequest(encodeURIComponent(tableName), {
       method: 'POST',
       body: JSON.stringify({ records }),
-    });
+    }) as { records?: AirtableRecord[] };
 
     results.push(...(data.records || []));
   }
@@ -173,7 +208,10 @@ export async function createMilestones(projectId, milestones) {
 
 // Create assignment records (role -> team member -> project)
 // roleAssignments: { role: { memberId, fte } } or { role: [{ memberId, fte }] }
-export async function createAssignments(projectId, roleAssignments) {
+export async function createAssignments(
+  projectId: string,
+  roleAssignments: Record<string, RoleAssignment | RoleAssignment[]>
+): Promise<AirtableRecord[]> {
   if (!roleAssignments || Object.keys(roleAssignments).length === 0) return [];
 
   const tableName = airtableTables.assignments || 'Assignments';
@@ -181,7 +219,7 @@ export async function createAssignments(projectId, roleAssignments) {
   const roleValues = airtableRoleValues;
 
   // Flatten role assignments into individual records
-  const records = [];
+  const records: Array<{ fields: Record<string, unknown> }> = [];
   for (const [roleKey, assignment] of Object.entries(roleAssignments)) {
     // Map form role key to Airtable Role field value using config
     const role = roleValues[roleKey] || 'Other';
@@ -193,7 +231,7 @@ export async function createAssignments(projectId, roleAssignments) {
     for (const { memberId, fte } of assignments) {
       if (!memberId) continue;
 
-      const fields = {
+      const fields: Record<string, unknown> = {
         [f.role || 'Role']: role,
         [f.team_member_link || 'Data Team Member']: [memberId],
         [f.project_link || 'Project']: [projectId],
@@ -210,17 +248,17 @@ export async function createAssignments(projectId, roleAssignments) {
   if (records.length === 0) return [];
 
   // Batch create (max 10 per request)
-  const batches = [];
+  const batches: Array<Array<{ fields: Record<string, unknown> }>> = [];
   for (let i = 0; i < records.length; i += 10) {
     batches.push(records.slice(i, i + 10));
   }
 
-  const results = [];
+  const results: AirtableRecord[] = [];
   for (const batch of batches) {
     const data = await airtableRequest(encodeURIComponent(tableName), {
       method: 'POST',
       body: JSON.stringify({ records: batch }),
-    });
+    }) as { records?: AirtableRecord[] };
 
     results.push(...(data.records || []));
   }
@@ -229,17 +267,21 @@ export async function createAssignments(projectId, roleAssignments) {
 }
 
 // Update a record
-export async function updateRecord(tableName, recordId, fields) {
+export async function updateRecord(
+  tableName: string,
+  recordId: string,
+  fields: Record<string, unknown>
+): Promise<AirtableRecord> {
   const data = await airtableRequest(`${encodeURIComponent(tableName)}/${recordId}`, {
     method: 'PATCH',
     body: JSON.stringify({ fields }),
   });
 
-  return data;
+  return data as AirtableRecord;
 }
 
 // Check if a project with this name already exists
-export async function checkProjectExists(projectName) {
+export async function checkProjectExists(projectName: string): Promise<ProjectExistsResult> {
   const tableName = airtableTables.projects || 'Projects';
   const nameField = airtableProjectFields.name || 'Project';
 
@@ -250,7 +292,7 @@ export async function checkProjectExists(projectName) {
     maxRecords: 1,
   });
 
-  const result = {
+  const result: ProjectExistsResult = {
     exists: records.length > 0,
     existingRecord: records[0] || null,
     url: records[0] ? `https://airtable.com/${BASE_ID}/${records[0].id}` : null,
