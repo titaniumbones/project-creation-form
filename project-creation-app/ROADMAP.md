@@ -81,25 +81,17 @@ In all the above cases, there are difficult UI questions and likely tradeoffs.
 
 If this is implemented, it will definitely require an ADR, and before  beginning work, a draft ADR should be checked in as a vehicle for discussion.  
 
+## Move all resource creation behind the modal, and add Scoping Doc and Asana Board fields to form
 
-## Move all resource creetion behingd the modal, and add Scoping Doc and Asana Board fields to form
-
-It is still too easy to create duplicates with this form.  Proposal: 
-- near the top of the form, offer to populate from an existing Airtable record. Uwer can enter a URL or search for a partial match. If a matrh is found, user is offered the chance to populate from that match. Show a preview in a new modal. 
+It is still too easy to create duplicates with this form. Proposal:
+- near the top of the form, offer to populate from an existing Airtable record. User can enter a URL or search for a partial match. If a match is found, user is offered the chance to populate from that match. Show a preview in a new modal.
 
 If populating from an existing record, remember that fact & during submission, default to updating that record. But also: Move the resource creation buttons into the modal. That is:
 
 - Rename "Check For Duplicates" to "Submit and Check".
--  within the modal, perform checks as before. If links to Scoping Doc or Asana Board have already been provided, check to see that they refer to real docs/boards.  
--  for each reasource, offer a set of radio button options as before.  Ensure each of them includes a "do noghing" (or similar) opton
--  This UI should replace the existing resource creation buttons, which should no longer be accessible directly from the form until after submission At that point, they should appear at the bottom of the page, and should include  the "link" and "recreate" buttons as they do right now.  
-
-## Autodeploy this app with github actions
-- deploy to prod on PR to main
-- deploy preview links on PR creation, and push notification of deploy link as comment to the PR
-
-Deploy *only* the project creation helper app, *not* the oauth relay, as the platform oauth endpoints need a stable redirect url.  `x
-
+- Within the modal, perform checks as before. If links to Scoping Doc or Asana Board have already been provided, check to see that they refer to real docs/boards.
+- For each resource, offer a set of radio button options as before. Ensure each of them includes a "do nothing" (or similar) option.
+- This UI should replace the existing resource creation buttons, which should no longer be accessible directly from the form until after submission. At that point, they should appear at the bottom of the page, and should include the "link" and "recreate" buttons as they do right now.
 
 
 ## Add Auth0 Authentication
