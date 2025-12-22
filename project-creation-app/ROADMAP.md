@@ -53,7 +53,19 @@ Several project types have well-developed Asana templates with additional projec
 3. Any project type without a specific template mapping falls back to `default_template_gid`
 4. Template GIDs are configurable in the TOML config file for semi-technical staff to update
 
+## Autodeploy this app with github actions
+- deploy to prod on merge to main [do not implement yet]
+- ~~deploy preview links on PR creation, and push notification of deploy link as comment to the PR~~ DONE
 
+Deploy *only* the project creation helper app, *not* the oauth relay, as the platform oauth endpoints need a stable redirect url.
+
+**Setup required for preview deploys:**
+Add these secrets in GitHub repo Settings > Secrets and variables > Actions:
+- `NETLIFY_AUTH_TOKEN` - Create at Netlify User Settings > Applications > Personal access tokens
+- `NETLIFY_SITE_ID` - `4bc49778-3108-4574-9923-1712db813c89`
+- `VITE_AIRTABLE_BASE_ID`, `VITE_ASANA_TEMPLATE_GID`, `VITE_ASANA_TEAM_GID`
+- `VITE_GOOGLE_SHARED_DRIVE_ID`, `VITE_GOOGLE_PROJECTS_FOLDER_ID`
+- `VITE_GOOGLE_SCOPING_DOC_TEMPLATE_ID`, `VITE_GOOGLE_KICKOFF_DECK_TEMPLATE_ID`  
 
 ## Manage Duplicates
 
