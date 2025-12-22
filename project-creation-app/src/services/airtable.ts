@@ -573,6 +573,70 @@ export function parseAirtableUrl(url: string): { recordId: string | null; baseId
   return { baseId: null, recordId: null };
 }
 
+// Get field options for single-select fields from Airtable metadata API
+export interface FieldOption {
+  id: string;
+  name: string;
+  color?: string;
+}
+
+export async function getFieldOptions(tableName: string, fieldName: string): Promise<FieldOption[]> {
+  const token = await getAccessToken();
+
+  debugLogger.log('airtable', 'Fetching field options', { tableName, fieldName });
+
+  // Use the metadata API to get table schema
+  const response = await fetch(`https://api.airtable.com/v0/meta/bases/${BASE_ID}/tables`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    const errorMsg = error.error?.message || `Failed to fetch metadata: ${response.status}`;
+    debugLogger.logApiResponse('airtable', 'meta/tables', error, new Error(errorMsg));
+    throw new Error(errorMsg);
+  }
+
+  const data = await response.json();
+  const tables = data.tables as Array<{ name: string; fields: Array<{ name: string; type: string; options?: { choices?: FieldOption[] } }> }>;
+
+  // Find the table
+  const table = tables.find(t => t.name === tableName);
+  if (!table) {
+    debugLogger.log('airtable', 'Table not found', { tableName, availableTables: tables.map(t => t.name) });
+    return [];
+  }
+
+  // Find the field
+  const field = table.fields.find(f => f.name === fieldName);
+  if (!field) {
+    debugLogger.log('airtable', 'Field not found', { fieldName, availableFields: table.fields.map(f => f.name) });
+    return [];
+  }
+
+  // Check if it's a single/multi-select field with choices
+  if (field.type !== 'singleSelect' && field.type !== 'multipleSelects') {
+    debugLogger.log('airtable', 'Field is not a select type', { fieldName, fieldType: field.type });
+    return [];
+  }
+
+  const choices = field.options?.choices || [];
+  debugLogger.log('airtable', 'Field options fetched', { fieldName, count: choices.length, choices });
+
+  return choices;
+}
+
+// Get project type options specifically
+export async function getProjectTypeOptions(): Promise<string[]> {
+  const tableName = airtableTables.projects || 'Projects';
+  const fieldName = airtableProjectFields.project_type || 'Project Type';
+
+  const options = await getFieldOptions(tableName, fieldName);
+  return options.map(opt => opt.name);
+}
+
 // Export config for use in other modules
 export { airtableProjectFields, airtableTables };
 
@@ -591,4 +655,6 @@ export default {
   getProjectMilestones,
   getProjectAssignments,
   parseAirtableUrl,
+  getFieldOptions,
+  getProjectTypeOptions,
 };

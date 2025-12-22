@@ -18,6 +18,7 @@ import { airtableRoleValues } from '../config';
 import { useTeamMembers } from '../hooks/useTeamMembers';
 import { useFunders } from '../hooks/useFunders';
 import { useParentInitiatives } from '../hooks/useParentInitiatives';
+import { useProjectTypes } from '../hooks/useProjectTypes';
 import { useFieldsConfig, useIntegrationsConfig } from '../hooks/useConfig';
 import { useDuplicateCheck } from '../hooks/useDuplicateCheck';
 import { useAsanaTemplateGid } from '../utils/asanaTemplates';
@@ -172,9 +173,9 @@ export default function ProjectForm() {
   const { data: teamMembers = [], isLoading: loadingMembers } = useTeamMembers();
   const { data: funders = [] } = useFunders();
   const { data: parentInitiatives = [] } = useParentInitiatives();
+  const { data: projectTypeOptions = [] } = useProjectTypes();
   const { config } = useFieldsConfig();
   const { config: integrationsConfig } = useIntegrationsConfig();
-  const projectTypeOptions = (config?.fields?.project_type?.options as string[]) || [];
 
   // Duplicate detection hook
   const {
