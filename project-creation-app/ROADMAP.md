@@ -53,7 +53,13 @@ Several project types have well-developed Asana templates with additional projec
 3. Any project type without a specific template mapping falls back to `default_template_gid`
 4. Template GIDs are configurable in the TOML config file for semi-technical staff to update
 
+## Autodeploy this app
+- deploy to prod on merge to main [do not implement yet]
+- ~~deploy preview links on PR creation~~ DONE (via Netlify native GitHub integration)
 
+Deploy *only* the project creation helper app, *not* the oauth relay, as the platform oauth endpoints need a stable redirect url.
+
+**How it works:** Netlify's native GitHub integration automatically creates deploy previews for PRs. The root `netlify.toml` configures `base = "project-creation-app"` for monorepo support. Environment variables are configured in Netlify site settings (sync with `npm run env:sync:execute`).  
 
 ## Add Auth0 Authentication
 
