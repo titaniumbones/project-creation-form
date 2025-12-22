@@ -15,6 +15,7 @@ import { getTemplateGidForProjectType } from '../utils/asanaTemplates';
 import { getConnectionStatus } from '../services/oauth';
 import * as drafts from '../services/drafts';
 import * as airtable from '../services/airtable';
+import { getRecordUrl } from '../services/airtable';
 import * as asana from '../services/asana';
 import * as google from '../services/google';
 import {
@@ -283,7 +284,7 @@ export default function ReviewDraft() {
           await airtable.createAssignments(projectId, roleAssignments);
         }
 
-        const airtableUrl = `https://airtable.com/${import.meta.env.VITE_AIRTABLE_BASE_ID}/${projectId}`;
+        const airtableUrl = getRecordUrl(projectId, 'projects');
         setCreatedResources(prev => ({ ...prev, airtableProjectId: projectId, airtableUrl }));
       }
 

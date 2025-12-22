@@ -186,9 +186,10 @@ interface OutcomeItemProps {
   onRemove: () => void;
   canRemove: boolean;
   disabled?: boolean;
+  teamMembers?: TeamMember[];
 }
 
-export function OutcomeItem({ index, register, onRemove, canRemove, disabled = false }: OutcomeItemProps) {
+export function OutcomeItem({ index, register, onRemove, canRemove, disabled = false, teamMembers = [] }: OutcomeItemProps) {
   return (
     <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
       <div className="flex justify-between items-start mb-3">
@@ -223,12 +224,27 @@ export function OutcomeItem({ index, register, onRemove, canRemove, disabled = f
           {...register(`outcomes.${index}.description`)}
         />
 
-        <input
-          type="date"
-          className="form-input"
-          disabled={disabled}
-          {...register(`outcomes.${index}.dueDate`)}
-        />
+        <div className="grid grid-cols-2 gap-3">
+          <input
+            type="date"
+            className="form-input"
+            disabled={disabled}
+            {...register(`outcomes.${index}.dueDate`)}
+          />
+
+          <select
+            className="form-input"
+            disabled={disabled}
+            {...register(`outcomes.${index}.assignee`)}
+          >
+            <option value="">Assign to Project Coordinator</option>
+            {teamMembers.map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.name}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
     </div>
   );
@@ -241,9 +257,10 @@ interface OutcomesSectionProps {
   append: UseFieldArrayAppend<FormData, 'outcomes'>;
   remove: UseFieldArrayRemove;
   disabled?: boolean;
+  teamMembers?: TeamMember[];
 }
 
-export function OutcomesSection({ fields, register, append, remove, disabled = false }: OutcomesSectionProps) {
+export function OutcomesSection({ fields, register, append, remove, disabled = false, teamMembers = [] }: OutcomesSectionProps) {
   return (
     <div className="space-y-4">
       {fields.map((field, index) => (
@@ -254,6 +271,7 @@ export function OutcomesSection({ fields, register, append, remove, disabled = f
           onRemove={() => remove(index)}
           canRemove={fields.length > 1}
           disabled={disabled}
+          teamMembers={teamMembers}
         />
       ))}
 
@@ -291,4 +309,6 @@ export const DEFAULT_FORM_VALUES: FormData = {
   funder: '',
   parentInitiative: '',
   projectType: '',
+  existingScopingDocUrl: '',
+  existingAsanaUrl: '',
 };

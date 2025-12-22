@@ -327,14 +327,33 @@ export async function searchProjectByName(
     `/workspaces/${workspaceGid}/typeahead?resource_type=project&query=${encodeURIComponent(projectName)}&opt_fields=name,permalink_url`
   );
 
-  const exactMatch = (results || []).find(p =>
-    p.name.toLowerCase() === projectName.toLowerCase()
-  );
+  // Log what we're comparing (trim to handle trailing spaces)
+  const searchTerm = projectName.toLowerCase().trim();
+  console.log('[Asana Search] Looking for substring match:', {
+    searchTerm,
+    resultsCount: (results || []).length,
+    resultNames: (results || []).map(p => {
+      const projectName = p.name.toLowerCase().trim();
+      return {
+        name: p.name,
+        nameTrimmed: p.name.trim(),
+        containsSearchTerm: projectName.includes(searchTerm),
+        searchTermContainsName: searchTerm.includes(projectName),
+        isMatch: projectName.includes(searchTerm) || searchTerm.includes(projectName),
+      };
+    }),
+  });
+
+  // Substring match: either the search term is in the project name, or vice versa
+  const match = (results || []).find(p => {
+    const projectNameLower = p.name.toLowerCase().trim();
+    return projectNameLower.includes(searchTerm) || searchTerm.includes(projectNameLower);
+  });
 
   const result: ProjectSearchResult = {
-    exists: !!exactMatch,
-    existingProject: exactMatch || null,
-    url: exactMatch?.permalink_url || null,
+    exists: !!match,
+    existingProject: match || null,
+    url: match?.permalink_url || null,
     searchResults: (results || []).slice(0, 5).map(p => ({ name: p.name, gid: p.gid })),
   };
 

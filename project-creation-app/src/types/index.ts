@@ -11,6 +11,7 @@ export interface Outcome {
   name: string;
   description: string;
   dueDate: string;
+  assignee?: string; // Team member ID - defaults to Project Coordinator if blank
 }
 
 export interface FormData {
@@ -25,6 +26,9 @@ export interface FormData {
   funder?: string;
   parentInitiative?: string;
   projectType?: string;
+  // Existing resource URLs (optional - skip creation if provided)
+  existingScopingDocUrl?: string;
+  existingAsanaUrl?: string;
 }
 
 // =============================================================================
@@ -272,4 +276,117 @@ export interface ShareDraftModalProps {
 
 export interface HelpTooltipProps {
   helpFile: string;
+}
+
+// =============================================================================
+// Duplicate Detection Types
+// =============================================================================
+
+/**
+ * Result of checking for an existing project in Airtable
+ */
+export interface AirtableDuplicateResult {
+  found: boolean;
+  record?: AirtableRecord;
+  url?: string;
+  /** Project name from the found record */
+  projectName?: string;
+  /** Created date of the found record */
+  createdTime?: string;
+}
+
+/**
+ * Result of searching for an existing project in Asana
+ */
+export interface AsanaDuplicateResult {
+  found: boolean;
+  project?: AsanaProject;
+  url?: string;
+  /** Other projects with similar names (for fuzzy matching future enhancement) */
+  searchResults?: Array<{ name: string; gid: string }>;
+  /** True if the user provided this URL via the form (not detected) */
+  userProvided?: boolean;
+  /** True if the check was skipped (e.g., no workspace GID) */
+  skipped?: boolean;
+}
+
+/**
+ * Result of searching for an existing folder in Google Drive
+ */
+export interface GoogleDuplicateResult {
+  found: boolean;
+  folderId?: string;
+  url?: string;
+  folderName?: string;
+  /** Documents found within the folder */
+  documents?: Array<{ name: string; id: string; mimeType?: string }>;
+  /** True if the user provided this URL via the form (not detected) */
+  userProvided?: boolean;
+}
+
+/**
+ * Combined result of checking all platforms for duplicates
+ */
+export interface DuplicateCheckResult {
+  airtable: AirtableDuplicateResult;
+  asana: AsanaDuplicateResult;
+  google: GoogleDuplicateResult;
+  /** True if any platform found a potential duplicate */
+  hasDuplicates: boolean;
+  /** Timestamp of when the check was performed */
+  checkedAt: number;
+}
+
+/**
+ * User's resolution choice for Airtable duplicates
+ * - update: Update the existing record with new data
+ * - create_new: Create a new record regardless of existing
+ * - skip: Skip Airtable creation entirely
+ */
+export type AirtableResolution = 'update' | 'create_new' | 'skip';
+
+/**
+ * User's resolution choice for Asana duplicates
+ * - use_existing: Add/update milestones in existing project
+ * - create_new: Create a new Asana project from template
+ * - skip: Skip Asana creation entirely
+ */
+export type AsanaResolution = 'use_existing' | 'create_new' | 'skip';
+
+/**
+ * User's resolution choice for Google Drive duplicates
+ * - keep: Leave existing folder/documents as-is, skip creation
+ * - skip: Explicitly skip Google Drive creation
+ * - recreate: Delete existing and recreate (future, hidden for now)
+ */
+export type GoogleResolution = 'keep' | 'skip' | 'recreate';
+
+/**
+ * User's resolution choices for all platforms
+ */
+export interface DuplicateResolution {
+  airtable: AirtableResolution;
+  asana: AsanaResolution;
+  google: GoogleResolution;
+}
+
+/**
+ * Default resolution strategies (configurable)
+ */
+export interface DuplicateDefaults {
+  airtable: AirtableResolution;
+  asana: AsanaResolution;
+  google: GoogleResolution;
+}
+
+/**
+ * Props for the DuplicateResolutionModal component
+ */
+export interface DuplicateResolutionModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: (resolution: DuplicateResolution) => void;
+  checkResult: DuplicateCheckResult;
+  defaults: DuplicateDefaults;
+  isLoading?: boolean;
 }
