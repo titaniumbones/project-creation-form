@@ -291,4 +291,6 @@ export const DEFAULT_FORM_VALUES: FormData = {
   funder: '',
   parentInitiative: '',
   projectType: '',
+  existingScopingDocUrl: '',
+  existingAsanaUrl: '',
 };

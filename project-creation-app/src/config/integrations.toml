@@ -6,15 +6,20 @@ relay_url_env = "VITE_OAUTH_RELAY_URL"
 
 [airtable]
 base_id_env = "VITE_AIRTABLE_BASE_ID"
-# Tables
+
+# Tables - names used for API calls
 projects_table = "Projects"
 milestones_table = "Milestones"
 assignments_table = "Assignments"
 team_members_table = "Data Team Members"
 
+# Table IDs - used for constructing URLs (find in Airtable URL when viewing a record)
+# Format: https://airtable.com/{baseId}/{tableId}/{viewId}/{recordId}
+projects_table_id = ""  # e.g., "tblXXXXXXXXXXXXXX"
+
 [asana]
 team_gid_env = "VITE_ASANA_TEAM_GID"
-workspace_gid = "1206584297698339"
+workspace_gid = "671639272801549"
 
 # Default template for unspecified project types
 default_template_gid = "1209652649504377"
@@ -34,3 +39,46 @@ kickoff_deck_template_id_env = "VITE_GOOGLE_KICKOFF_DECK_TEMPLATE_ID"
 # Shared Drive location
 shared_drive_id_env = "VITE_GOOGLE_SHARED_DRIVE_ID"
 parent_folder_id_env = "VITE_GOOGLE_PARENT_FOLDER_ID"
+
+# =============================================================================
+# Duplicate Detection & Resolution
+# =============================================================================
+
+[duplicates]
+# Enable duplicate checking before project creation
+enabled = true
+
+# Default resolution strategies when duplicates are found
+# These are pre-selected in the resolution modal; users can override
+[duplicates.defaults]
+airtable = "update"       # "update" | "create_new"
+asana = "use_existing"    # "use_existing" | "create_new"
+google = "keep"           # "keep" | "skip" | "recreate"
+
+[duplicates.airtable]
+# Fields to update when using "update" strategy
+# Scalar fields are overwritten; linked records (milestones, assignments) are merged
+update_fields = [
+  "description",
+  "objectives",
+  "start_date",
+  "end_date",
+  "funder",
+  "parent_initiative",
+  "project_type"
+]
+# Merge milestones by matching on name
+merge_milestones = true
+# Merge assignments by matching on role
+merge_assignments = true
+
+[duplicates.asana]
+# When using existing project, update milestones that match by name
+update_milestones = true
+# Sync project members when using existing project
+sync_members = true
+
+[duplicates.google]
+# Allow the destructive "recreate" option in the UI
+# When false, only "keep" and "skip" are shown
+allow_recreate = false

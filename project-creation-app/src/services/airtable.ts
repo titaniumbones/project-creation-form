@@ -3,6 +3,8 @@ import { getValidToken } from './oauth';
 import { debugLogger } from './debugLogger';
 import {
   airtableTables,
+  airtableTableIds,
+  airtableViewIds,
   airtableProjectFields,
   airtableMilestoneFields,
   airtableAssignmentFields,
@@ -16,6 +18,31 @@ import type { AirtableRecord, TeamMember, RoleAssignment, Funder, ParentInitiati
 
 const BASE_ID = import.meta.env.VITE_AIRTABLE_BASE_ID;
 const API_URL = 'https://api.airtable.com/v0';
+
+/**
+ * Build an Airtable record URL.
+ * Format: https://airtable.com/{baseId}/{tableId}/{viewId}/{recordId}
+ * Falls back gracefully if table/view IDs aren't configured.
+ */
+export function getRecordUrl(recordId: string, tableKey: string = 'projects'): string {
+  const tableId = airtableTableIds[tableKey];
+  const viewId = airtableViewIds[tableKey];
+
+  // Table ID is required for working URLs
+  if (!tableId) {
+    console.warn(`[Airtable] No table ID configured for "${tableKey}". URL may not work.`);
+    const tableName = airtableTables[tableKey] || 'Projects';
+    return `https://airtable.com/${BASE_ID}/${tableName}/${recordId}`;
+  }
+
+  // Build URL with view ID if available
+  if (viewId) {
+    return `https://airtable.com/${BASE_ID}/${tableId}/${viewId}/${recordId}`;
+  }
+
+  // Without view ID, Airtable will use the default view
+  return `https://airtable.com/${BASE_ID}/${tableId}/${recordId}`;
+}
 
 interface GetRecordsOptions {
   fields?: string[];
@@ -333,26 +360,217 @@ export async function updateRecord(
   return data as AirtableRecord;
 }
 
-// Check if a project with this name already exists
+// Check if a project with this name already exists (substring match)
 export async function checkProjectExists(projectName: string): Promise<ProjectExistsResult> {
   const tableName = airtableTables.projects || 'Projects';
   const nameField = airtableProjectFields.name || 'Project';
 
-  debugLogger.log('airtable', 'Checking for existing project', { projectName });
+  // Escape special characters for Airtable formula
+  const escapedName = projectName.replace(/"/g, '\\"').replace(/\\/g, '\\\\');
+
+  // Use FIND for case-insensitive substring match
+  // FIND returns 0 if not found, >0 if found
+  const filterFormula = `OR(FIND(LOWER("${escapedName}"), LOWER({${nameField}})) > 0, FIND(LOWER({${nameField}}), LOWER("${escapedName}")) > 0)`;
+  console.log('[Airtable Search] Filter formula (substring):', filterFormula);
+
+  debugLogger.log('airtable', 'Checking for existing project', { projectName, filterFormula });
 
   const records = await getRecords(tableName, {
-    filterByFormula: `{${nameField}} = "${projectName.replace(/"/g, '\\"')}"`,
-    maxRecords: 1,
+    filterByFormula: filterFormula,
+    maxRecords: 5, // Get up to 5 matches for substring
+  });
+
+  console.log('[Airtable Search] Results:', {
+    recordsFound: records.length,
+    records: records.map(r => ({
+      id: r.id,
+      name: r.fields[nameField],
+    })),
   });
 
   const result: ProjectExistsResult = {
     exists: records.length > 0,
     existingRecord: records[0] || null,
-    url: records[0] ? `https://airtable.com/${BASE_ID}/${records[0].id}` : null,
+    url: records[0] ? getRecordUrl(records[0].id, 'projects') : null,
   };
 
   debugLogger.log('airtable', 'Duplicate check result', result);
   return result;
+}
+
+// Search projects by name (substring match) - returns multiple results for selection
+export interface ProjectSearchResult {
+  id: string;
+  name: string;
+  acronym?: string;
+  startDate?: string;
+  endDate?: string;
+  status?: string;
+  url: string;
+}
+
+export async function searchProjects(searchTerm: string, maxResults: number = 10): Promise<ProjectSearchResult[]> {
+  const tableName = airtableTables.projects || 'Projects';
+  const f = airtableProjectFields;
+  const nameField = f.name || 'Project';
+
+  // Escape special characters for Airtable formula
+  const escapedTerm = searchTerm.replace(/"/g, '\\"').replace(/\\/g, '\\\\');
+
+  // Use FIND for case-insensitive substring match
+  const filterFormula = `OR(FIND(LOWER("${escapedTerm}"), LOWER({${nameField}})) > 0, FIND(LOWER({${nameField}}), LOWER("${escapedTerm}")) > 0)`;
+
+  debugLogger.log('airtable', 'Searching projects', { searchTerm, filterFormula });
+
+  const records = await getRecords(tableName, {
+    fields: [
+      nameField,
+      f.acronym || 'Project Acronym',
+      f.start_date || 'Start Date',
+      f.end_date || 'End Date',
+      f.status || 'Status',
+    ],
+    filterByFormula: filterFormula,
+    maxRecords: maxResults,
+    sort: [{ field: nameField, direction: 'asc' }],
+  });
+
+  return records.map(r => ({
+    id: r.id,
+    name: r.fields[nameField] as string,
+    acronym: r.fields[f.acronym || 'Project Acronym'] as string | undefined,
+    startDate: r.fields[f.start_date || 'Start Date'] as string | undefined,
+    endDate: r.fields[f.end_date || 'End Date'] as string | undefined,
+    status: r.fields[f.status || 'Status'] as string | undefined,
+    url: getRecordUrl(r.id, 'projects'),
+  }));
+}
+
+// Get a single project record by ID with full details
+export interface FullProjectData {
+  id: string;
+  name: string;
+  acronym?: string;
+  description?: string;
+  objectives?: string;
+  startDate?: string;
+  endDate?: string;
+  status?: string;
+  funder?: string[];
+  parentInitiative?: string[];
+  projectType?: string;
+  asanaUrl?: string;
+  scopingDocUrl?: string;
+  folderUrl?: string;
+  url: string;
+}
+
+export async function getProjectById(projectId: string): Promise<FullProjectData | null> {
+  const tableName = airtableTables.projects || 'Projects';
+  const f = airtableProjectFields;
+
+  try {
+    const data = await airtableRequest(`${encodeURIComponent(tableName)}/${projectId}`) as AirtableRecord;
+
+    return {
+      id: data.id,
+      name: data.fields[f.name || 'Project'] as string,
+      acronym: data.fields[f.acronym || 'Project Acronym'] as string | undefined,
+      description: data.fields[f.description || 'Project Description'] as string | undefined,
+      objectives: data.fields[f.objectives || 'Objectives'] as string | undefined,
+      startDate: data.fields[f.start_date || 'Start Date'] as string | undefined,
+      endDate: data.fields[f.end_date || 'End Date'] as string | undefined,
+      status: data.fields[f.status || 'Status'] as string | undefined,
+      funder: data.fields[f.funder || 'Funder'] as string[] | undefined,
+      parentInitiative: data.fields[f.parent_initiative || 'Parent Initiative'] as string[] | undefined,
+      projectType: data.fields[f.project_type || 'Project Type'] as string | undefined,
+      asanaUrl: data.fields[f.asana_url || 'Asana Board'] as string | undefined,
+      scopingDocUrl: data.fields[f.scoping_doc_url || 'Project Scope'] as string | undefined,
+      folderUrl: data.fields[f.folder_url || 'Project Folder'] as string | undefined,
+      url: getRecordUrl(data.id, 'projects'),
+    };
+  } catch (error) {
+    debugLogger.log('error', 'Failed to fetch project by ID', { projectId, error });
+    return null;
+  }
+}
+
+// Get milestones for a project
+export interface MilestoneRecord {
+  id: string;
+  name: string;
+  description?: string;
+  dueDate?: string;
+}
+
+export async function getProjectMilestones(projectId: string): Promise<MilestoneRecord[]> {
+  const tableName = airtableTables.milestones || 'Milestones';
+  const f = airtableMilestoneFields;
+  const projectLinkField = f.project_link || 'Project';
+
+  // Filter by project link
+  const filterFormula = `FIND("${projectId}", ARRAYJOIN({${projectLinkField}})) > 0`;
+
+  const records = await getRecords(tableName, {
+    fields: [
+      f.name || 'Milestone',
+      f.description || 'Description',
+      f.due_date || 'Due Date',
+    ],
+    filterByFormula: filterFormula,
+    sort: [{ field: f.due_date || 'Due Date', direction: 'asc' }],
+  });
+
+  return records.map(r => ({
+    id: r.id,
+    name: r.fields[f.name || 'Milestone'] as string,
+    description: r.fields[f.description || 'Description'] as string | undefined,
+    dueDate: r.fields[f.due_date || 'Due Date'] as string | undefined,
+  }));
+}
+
+// Get assignments for a project
+export interface AssignmentRecord {
+  id: string;
+  role: string;
+  teamMemberId: string;
+  fte?: number;
+}
+
+export async function getProjectAssignments(projectId: string): Promise<AssignmentRecord[]> {
+  const tableName = airtableTables.assignments || 'Assignments';
+  const f = airtableAssignmentFields;
+  const projectLinkField = f.project_link || 'Project';
+
+  // Filter by project link
+  const filterFormula = `FIND("${projectId}", ARRAYJOIN({${projectLinkField}})) > 0`;
+
+  const records = await getRecords(tableName, {
+    fields: [
+      f.role || 'Role',
+      f.team_member_link || 'Data Team Member',
+      f.fte || 'FTE',
+    ],
+    filterByFormula: filterFormula,
+  });
+
+  return records.map(r => ({
+    id: r.id,
+    role: r.fields[f.role || 'Role'] as string,
+    teamMemberId: (r.fields[f.team_member_link || 'Data Team Member'] as string[])?.[0] || '',
+    fte: r.fields[f.fte || 'FTE'] as number | undefined,
+  }));
+}
+
+// Parse Airtable URL to extract record ID
+export function parseAirtableUrl(url: string): { recordId: string | null; baseId: string | null } {
+  // Airtable URLs: https://airtable.com/{baseId}/{tableId}/{viewId?}/{recordId}
+  // or: https://airtable.com/{baseId}/{tableId}/{recordId}
+  const match = url.match(/airtable\.com\/([^/]+)\/[^/]+(?:\/[^/]+)?\/([^/?]+)/);
+  if (match) {
+    return { baseId: match[1], recordId: match[2] };
+  }
+  return { baseId: null, recordId: null };
 }
 
 // Export config for use in other modules
@@ -368,4 +586,9 @@ export default {
   createAssignments,
   updateRecord,
   checkProjectExists,
+  searchProjects,
+  getProjectById,
+  getProjectMilestones,
+  getProjectAssignments,
+  parseAirtableUrl,
 };

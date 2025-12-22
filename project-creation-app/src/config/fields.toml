@@ -76,6 +76,28 @@ section = "basics"
 airtable_field = "Project Type"
 options = ["Project", "Report", "Convening", "Standard Project"]
 
+# -----------------------------------------------------------------------------
+# EXISTING RESOURCE LINKS (optional - if resources already exist)
+# -----------------------------------------------------------------------------
+
+[fields.existing_scoping_doc_url]
+type = "url"
+label = "Existing Scoping Doc URL"
+required = false
+placeholder = "https://docs.google.com/document/d/..."
+section = "basics"
+help_text = "If a scoping document already exists, paste its URL here to skip creation"
+validation_pattern = "docs\\.google\\.com/document/d/"
+
+[fields.existing_asana_url]
+type = "url"
+label = "Existing Asana Board URL"
+required = false
+placeholder = "https://app.asana.com/..."
+section = "basics"
+help_text = "If an Asana project already exists, paste its URL here to skip creation"
+validation_pattern = "app\\.asana\\.com/"
+
 # =============================================================================
 # DESCRIPTION FIELDS
 # =============================================================================
@@ -205,6 +227,14 @@ team_members = "Data Team Members"
 drafts = "Project Drafts"
 funders = "Funders"
 parent_initiatives = "Parent Initiatives"
+
+# Table IDs for URL construction (find in Airtable URL: airtable.com/{baseId}/{tableId}/{viewId}/{recordId})
+[airtable.table_ids]
+projects = "tblV9NkWJhFScRsbx"
+
+# View IDs for URL construction (the default view to open records in)
+[airtable.view_ids]
+projects = "viwNL0a6e0n7QkN8Z"
 
 [airtable.team_members_fields]
 # Fields to fetch from team members table

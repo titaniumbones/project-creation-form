@@ -13,6 +13,27 @@ interface ConfigHookResult<T> {
   isLoading: boolean;
 }
 
+interface DuplicatesConfig {
+  enabled?: boolean;
+  defaults?: {
+    airtable?: 'update' | 'create_new';
+    asana?: 'use_existing' | 'create_new';
+    google?: 'keep' | 'skip' | 'recreate';
+  };
+  airtable?: {
+    update_fields?: string[];
+    merge_milestones?: boolean;
+    merge_assignments?: boolean;
+  };
+  asana?: {
+    update_milestones?: boolean;
+    sync_members?: boolean;
+  };
+  google?: {
+    allow_recreate?: boolean;
+  };
+}
+
 interface IntegrationsConfig {
   asana?: {
     workspace_gid?: string;
@@ -26,7 +47,10 @@ interface IntegrationsConfig {
     scoping_doc_template_id?: string;
     kickoff_deck_template_id?: string;
   };
+  duplicates?: DuplicatesConfig;
 }
+
+export type { DuplicatesConfig, IntegrationsConfig };
 
 interface FieldWithName extends FieldConfig {
   name: string;

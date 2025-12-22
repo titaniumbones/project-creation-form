@@ -7,6 +7,8 @@ import type { Config, AirtableConfig } from '../types';
 interface ParsedConfig extends Config {
   airtable: AirtableConfig & {
     tables: Record<string, string>;
+    table_ids: Record<string, string>;
+    view_ids: Record<string, string>;
     project_fields: Record<string, string>;
     milestone_fields: Record<string, string>;
     assignment_fields: Record<string, string>;
@@ -51,6 +53,8 @@ try {
 // Airtable configuration
 export const airtableConfig = parsedConfig.airtable || {};
 export const airtableTables = airtableConfig.tables || {};
+export const airtableTableIds = airtableConfig.table_ids || {};
+export const airtableViewIds = airtableConfig.view_ids || {};
 export const airtableProjectFields = airtableConfig.project_fields || {};
 export const airtableMilestoneFields = airtableConfig.milestone_fields || {};
 export const airtableAssignmentFields = airtableConfig.assignment_fields || {};
