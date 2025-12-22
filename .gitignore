@@ -8,3 +8,5 @@
 # secrets
 .env
 /airtable/project-creation-debug-2025-12-20T22-24-34-338Z.json
+/docs/architecture/ADR-006-duplicate-management-DRAFT_files/
+/docs/architecture/ADR-006-duplicate-management-DRAFT.html
