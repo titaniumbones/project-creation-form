@@ -1,0 +1,48 @@
+name: Preview Deploy
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'project-creation-app/**'
+
+jobs:
+  deploy-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: project-creation-app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: project-creation-app
+        run: npm ci
+
+      - name: Build
+        working-directory: project-creation-app
+        env:
+          VITE_OAUTH_RELAY_URL: https://airtable-asana-integration-oauth.netlify.app
+          VITE_AIRTABLE_BASE_ID: ${{ secrets.VITE_AIRTABLE_BASE_ID }}
+          VITE_ASANA_TEMPLATE_GID: ${{ secrets.VITE_ASANA_TEMPLATE_GID }}
+          VITE_ASANA_TEAM_GID: ${{ secrets.VITE_ASANA_TEAM_GID }}
+          VITE_GOOGLE_SHARED_DRIVE_ID: ${{ secrets.VITE_GOOGLE_SHARED_DRIVE_ID }}
+          VITE_GOOGLE_PROJECTS_FOLDER_ID: ${{ secrets.VITE_GOOGLE_PROJECTS_FOLDER_ID }}
+          VITE_GOOGLE_SCOPING_DOC_TEMPLATE_ID: ${{ secrets.VITE_GOOGLE_SCOPING_DOC_TEMPLATE_ID }}
+          VITE_GOOGLE_KICKOFF_DECK_TEMPLATE_ID: ${{ secrets.VITE_GOOGLE_KICKOFF_DECK_TEMPLATE_ID }}
+        run: npm run build
+
+      - name: Deploy to Netlify
+        uses: nwtgck/actions-netlify@v3
+        with:
+          publish-dir: project-creation-app/dist
+          production-deploy: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          deploy-message: "Deploy from PR #${{ github.event.pull_request.number }}"
+          alias: pr-${{ github.event.pull_request.number }}
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
