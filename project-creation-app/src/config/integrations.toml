@@ -31,6 +31,7 @@ default_template_gid = "1209652649504377"
 # Example: Report and Convening have specific templates
 # Report = "REPORT_TEMPLATE_GID_HERE"
 # Convening = "CONVENING_TEMPLATE_GID_HERE"
+Product = "1212543818793984"
 
 [google]
 # Template document/presentation IDs

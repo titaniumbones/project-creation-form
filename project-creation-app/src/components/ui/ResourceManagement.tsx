@@ -76,6 +76,7 @@ interface ResourceManagementProps {
   airtableProjectId: string | undefined;
   onLinkResource: (resourceKey: keyof CreatedResources, url: string) => Promise<void>;
   onCreateResource: (resourceType: 'asana' | 'scopingDoc' | 'kickoffDeck' | 'folder') => Promise<void>;
+  onSyncMilestones?: () => Promise<void>;
   isLoading: boolean;
 }
 
@@ -242,11 +243,14 @@ export default function ResourceManagement({
   airtableProjectId,
   onLinkResource,
   onCreateResource,
+  onSyncMilestones,
   isLoading,
 }: ResourceManagementProps) {
   const [loadingType, setLoadingType] = useState<string | null>(null);
 
   const hasAirtableRecord = !!airtableProjectId;
+  const hasAsanaProject = !!createdResources.asanaProjectGid;
+  const milestonesCreated = !!createdResources.asanaMilestonesCreated;
 
   // Don't show if no Airtable record exists
   if (!hasAirtableRecord) {
@@ -258,8 +262,11 @@ export default function ResourceManagement({
     (config) => !!createdResources[config.urlKey] || !connectionStatus[config.service]
   );
 
-  // Don't show if everything is complete
-  if (allResourcesCreated) {
+  // Check if milestones need attention
+  const milestonesNeedSync = hasAsanaProject && !milestonesCreated && connectionStatus.asana;
+
+  // Don't show if everything is complete (resources and milestones)
+  if (allResourcesCreated && !milestonesNeedSync) {
     return null;
   }
 
@@ -290,6 +297,16 @@ export default function ResourceManagement({
     }
   };
 
+  const handleSyncMilestones = async () => {
+    if (!onSyncMilestones) return;
+    setLoadingType('milestones');
+    try {
+      await onSyncMilestones();
+    } finally {
+      setLoadingType(null);
+    }
+  };
+
   return (
     <div className="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
       <h4 className="font-medium text-gray-900 mb-3">Manage Resources</h4>
@@ -310,6 +327,39 @@ export default function ResourceManagement({
             loadingType={loadingType}
           />
         ))}
+
+        {/* Asana Milestones Section */}
+        {hasAsanaProject && connectionStatus.asana && (
+          <div className="flex items-center gap-3 py-2">
+            {milestonesCreated ? (
+              <>
+                <CheckCircleIcon className="w-5 h-5 text-green-600 flex-shrink-0" />
+                <span className="text-gray-900 flex-1">Asana Milestones</span>
+                <span className="text-xs text-green-600">Synced</span>
+              </>
+            ) : (
+              <>
+                <XCircleIcon className="w-5 h-5 text-amber-500 flex-shrink-0" />
+                <span className="text-gray-500 flex-1">Asana Milestones</span>
+                {onSyncMilestones && (
+                  <button
+                    type="button"
+                    onClick={handleSyncMilestones}
+                    disabled={isLoading || loadingType !== null}
+                    className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                  >
+                    {loadingType === 'milestones' ? (
+                      <ArrowPathIcon className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <ArrowPathIcon className="w-3.5 h-3.5" />
+                    )}
+                    Sync to Asana
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

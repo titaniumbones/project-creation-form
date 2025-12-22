@@ -719,6 +719,68 @@ export default function ProjectForm() {
     }
   };
 
+  // Sync milestones to Asana (for post-facto creation)
+  const handleSyncMilestones = async (): Promise<void> => {
+    if (!createdResources.asanaProjectGid) {
+      setSubmitError('No Asana project found. Please create or link an Asana project first.');
+      return;
+    }
+
+    setLoadingAction('syncMilestones');
+    setSubmitError(null);
+
+    try {
+      const data = getFormData();
+      const validOutcomes = data.outcomes.filter(o => o.name?.trim());
+
+      if (validOutcomes.length === 0) {
+        setSubmitError('No milestones to sync. Please add outcomes first.');
+        return;
+      }
+
+      // Get Asana users for assignee matching
+      const asanaUsers = await asana.getWorkspaceUsers(
+        integrationsConfig?.asana?.workspace_gid || import.meta.env.VITE_ASANA_WORKSPACE_GID
+      );
+
+      // Get project coordinator member ID for default assignment
+      const projectCoordinatorId = data.roles.project_coordinator?.memberId;
+
+      // Helper to find Asana user GID
+      const findUserGid = (memberId: string | undefined): string | null => {
+        if (!memberId) return null;
+        const member = teamMembers.find((m) => m.id === memberId);
+        if (!member) return null;
+        const match = asana.findBestUserMatch(member.name, asanaUsers);
+        return match?.user.gid || null;
+      };
+
+      for (const outcome of validOutcomes) {
+        // Use specific assignee if set, otherwise default to project coordinator
+        const assigneeMemberId = outcome.assignee || projectCoordinatorId;
+        const assigneeGid = findUserGid(assigneeMemberId);
+
+        await asana.createTask(
+          createdResources.asanaProjectGid,
+          {
+            name: outcome.name,
+            description: outcome.description,
+            dueDate: outcome.dueDate,
+          },
+          assigneeGid
+        );
+      }
+
+      updateCreatedResources({ asanaMilestonesCreated: true });
+      debugLogger.log('form', 'Milestones synced to Asana', { count: validOutcomes.length });
+    } catch (err) {
+      setSubmitError(`Milestone sync failed: ${(err as Error).message}`);
+      debugLogger.log('error', 'Milestone sync failed', err);
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
   // === CREATE ALL RESOURCES (with duplicate check) ===
 
   // Create all resources in sequence after duplicate resolution
@@ -745,6 +807,33 @@ export default function ProjectForm() {
       const skipGoogle = resolution?.google === 'skip';
       const skipAirtable = resolution?.airtable === 'skip';
 
+      // Track newly created resource IDs locally (React state updates are async)
+      let newAsanaProjectGid: string | undefined;
+      let newAirtableProjectId: string | undefined;
+      let newScopingDocUrl: string | undefined;
+      let newFolderUrl: string | undefined;
+      let asanaUsers: AsanaUser[] | null = null;
+
+      // Helper to get Asana users (fetch once and cache)
+      const getAsanaUsers = async (): Promise<AsanaUser[]> => {
+        if (!asanaUsers) {
+          asanaUsers = await asana.getWorkspaceUsers(
+            integrationsConfig?.asana?.workspace_gid || import.meta.env.VITE_ASANA_WORKSPACE_GID
+          );
+        }
+        return asanaUsers;
+      };
+
+      // Helper to find Asana user GID for a team member
+      const findAsanaUserGid = async (memberId: string | undefined): Promise<string | null> => {
+        if (!memberId) return null;
+        const member = teamMembers.find((m) => m.id === memberId);
+        if (!member) return null;
+        const users = await getAsanaUsers();
+        const match = asana.findBestUserMatch(member.name, users);
+        return match?.user.gid || null;
+      };
+
       // If user provided existing URLs, use them instead of creating
       if (hasExistingAsana && !createdResources.asanaUrl) {
         debugLogger.log('form', 'Using existing Asana URL from form', data.existingAsanaUrl);
@@ -758,16 +847,14 @@ export default function ProjectForm() {
       // 1. Create Asana Board (if connected, not skipped, and no existing URL)
       if (connectionStatus.asana && !createdResources.asanaProjectGid && !hasExistingAsana && !skipAsana) {
         try {
-          const asanaUsers = await asana.getWorkspaceUsers(
-            integrationsConfig?.asana?.workspace_gid || import.meta.env.VITE_ASANA_WORKSPACE_GID
-          );
+          const users = await getAsanaUsers();
 
           const roleAssignments: AsanaRoleAssignment[] = [];
           for (const [roleName, assignment] of Object.entries(data.roles)) {
             if (assignment?.memberId) {
               const member = teamMembers.find((m) => m.id === assignment.memberId);
               if (member) {
-                const match = asana.findBestUserMatch(member.name, asanaUsers);
+                const match = asana.findBestUserMatch(member.name, users);
                 if (match) {
                   roleAssignments.push({ roleName, userGid: match.user.gid });
                 }
@@ -775,7 +862,7 @@ export default function ProjectForm() {
             }
           }
 
-          const asanaProjectGid = await asana.createProjectFromTemplate(
+          newAsanaProjectGid = await asana.createProjectFromTemplate(
             templateGid || import.meta.env.VITE_ASANA_TEMPLATE_GID,
             data.projectName,
             import.meta.env.VITE_ASANA_TEAM_GID,
@@ -783,8 +870,8 @@ export default function ProjectForm() {
             roleAssignments
           );
 
-          const asanaUrl = asana.getProjectUrl(asanaProjectGid);
-          updateCreatedResources({ asanaProjectGid, asanaUrl });
+          const asanaUrl = asana.getProjectUrl(newAsanaProjectGid);
+          updateCreatedResources({ asanaProjectGid: newAsanaProjectGid, asanaUrl });
         } catch (err) {
           debugLogger.log('error', 'Asana Board creation failed', err);
           // Continue with other resources
@@ -792,15 +879,28 @@ export default function ProjectForm() {
       }
 
       // 2. Create Asana Milestones
-      if (connectionStatus.asana && createdResources.asanaProjectGid && !createdResources.asanaMilestonesCreated) {
+      // Use newAsanaProjectGid (just created) or createdResources.asanaProjectGid (from previous run)
+      const asanaProjectGidForMilestones = newAsanaProjectGid || createdResources.asanaProjectGid;
+      if (connectionStatus.asana && asanaProjectGidForMilestones && !createdResources.asanaMilestonesCreated) {
         try {
+          // Get project coordinator member ID for default assignment
+          const projectCoordinatorId = data.roles.project_coordinator?.memberId;
+
           for (const outcome of data.outcomes) {
             if (outcome.name) {
-              await asana.createTask(createdResources.asanaProjectGid, {
-                name: outcome.name,
-                description: outcome.description,
-                dueDate: outcome.dueDate,
-              });
+              // Use specific assignee if set, otherwise default to project coordinator
+              const assigneeMemberId = outcome.assignee || projectCoordinatorId;
+              const assigneeGid = await findAsanaUserGid(assigneeMemberId);
+
+              await asana.createTask(
+                asanaProjectGidForMilestones,
+                {
+                  name: outcome.name,
+                  description: outcome.description,
+                  dueDate: outcome.dueDate,
+                },
+                assigneeGid
+              );
             }
           }
           updateCreatedResources({ asanaMilestonesCreated: true });
@@ -820,9 +920,10 @@ export default function ProjectForm() {
             sharedDriveId,
             parentFolderId
           );
+          newFolderUrl = google.getFolderUrl(folderId);
           updateCreatedResources({
             googleFolderId: folderId,
-            folderUrl: google.getFolderUrl(folderId),
+            folderUrl: newFolderUrl,
           });
 
           // Create Scoping Doc (only if user didn't provide existing URL)
@@ -836,9 +937,10 @@ export default function ProjectForm() {
             const replacements = google.buildReplacements(data);
             await google.populateDocWithTables(scopingDoc.id, data, teamMembers);
             await google.populateDoc(scopingDoc.id, replacements);
+            newScopingDocUrl = google.getDocUrl(scopingDoc.id);
             updateCreatedResources({
               scopingDocId: scopingDoc.id,
-              scopingDocUrl: google.getDocUrl(scopingDoc.id),
+              scopingDocUrl: newScopingDocUrl,
             });
           }
 
@@ -862,41 +964,118 @@ export default function ProjectForm() {
         }
       }
 
-      // 4. Create Airtable Records (skip if user chose to skip)
-      if (connectionStatus.airtable && !createdResources.airtableProjectId && !skipAirtable) {
+      // 4. Create or Update Airtable Records
+      const shouldUpdateAirtable = resolution?.airtable === 'update' && duplicateResult?.airtable?.record?.id;
+      const existingAirtableId = duplicateResult?.airtable?.record?.id;
+
+      if (connectionStatus.airtable && !skipAirtable) {
         try {
-          const project = await airtable.createProject({
-            name: data.projectName,
-            acronym: data.projectAcronym,
-            description: data.description,
-            objectives: data.objectives,
-            startDate: data.startDate,
-            endDate: data.endDate,
-            funder: data.funder,
-            parentInitiative: data.parentInitiative,
-            projectType: data.projectType,
-          });
+          const f = airtableProjectFields;
+          const tableName = airtableTables.projects || 'Projects';
 
-          const projectId = project.id;
+          if (shouldUpdateAirtable && existingAirtableId) {
+            // UPDATE existing record
+            debugLogger.log('form', 'Updating existing Airtable record', { existingAirtableId });
 
-          // Create milestones
-          const milestones = data.outcomes
-            .filter((o) => o.name)
-            .map((o) => ({
-              name: o.name,
-              description: o.description,
-              dueDate: o.dueDate,
-            }));
-          await airtable.createMilestones(projectId, milestones);
+            const updateFields: Record<string, unknown> = {
+              [f.name || 'Project']: data.projectName,
+              [f.acronym || 'Project Acronym']: data.projectAcronym || '',
+              [f.description || 'Project Description']: data.description || '',
+              [f.objectives || 'Objectives']: data.objectives || '',
+              [f.start_date || 'Start Date']: data.startDate || null,
+              [f.end_date || 'End Date']: data.endDate || null,
+            };
 
-          // Create assignments
-          await airtable.createAssignments(projectId, data.roles);
+            // Add optional fields
+            if (data.funder) {
+              updateFields[f.funder || 'Funder'] = [data.funder];
+            }
+            if (data.parentInitiative) {
+              updateFields[f.parent_initiative || 'Parent Initiative'] = [data.parentInitiative];
+            }
+            if (data.projectType) {
+              updateFields[f.project_type || 'Project Type'] = data.projectType;
+            }
 
-          const airtableUrl = getRecordUrl(projectId, 'projects');
-          updateCreatedResources({ airtableProjectId: projectId, airtableUrl });
+            await airtable.updateRecord(tableName, existingAirtableId, updateFields);
+            newAirtableProjectId = existingAirtableId;
+
+            // TODO: Merge milestones and assignments (for now, just note this)
+            debugLogger.log('form', 'Note: Milestone/assignment merging not yet implemented');
+
+            const airtableUrl = getRecordUrl(existingAirtableId, 'projects');
+            updateCreatedResources({ airtableProjectId: existingAirtableId, airtableUrl });
+
+          } else if (!createdResources.airtableProjectId) {
+            // CREATE new record
+            debugLogger.log('form', 'Creating new Airtable record');
+
+            const project = await airtable.createProject({
+              name: data.projectName,
+              acronym: data.projectAcronym,
+              description: data.description,
+              objectives: data.objectives,
+              startDate: data.startDate,
+              endDate: data.endDate,
+              funder: data.funder,
+              parentInitiative: data.parentInitiative,
+              projectType: data.projectType,
+            });
+
+            newAirtableProjectId = project.id;
+
+            // Create milestones
+            const milestones = data.outcomes
+              .filter((o) => o.name)
+              .map((o) => ({
+                name: o.name,
+                description: o.description,
+                dueDate: o.dueDate,
+              }));
+            await airtable.createMilestones(newAirtableProjectId, milestones);
+
+            // Create assignments
+            await airtable.createAssignments(newAirtableProjectId, data.roles);
+
+            const airtableUrl = getRecordUrl(newAirtableProjectId, 'projects');
+            updateCreatedResources({ airtableProjectId: newAirtableProjectId, airtableUrl });
+          }
         } catch (err) {
-          debugLogger.log('error', 'Airtable creation failed', err);
+          debugLogger.log('error', 'Airtable creation/update failed', err);
           setSubmitError(`Airtable: ${(err as Error).message}`);
+        }
+      }
+
+      // 5. Update Airtable record with resource URLs (if we have an Airtable record)
+      const airtableProjectIdToUpdate = newAirtableProjectId || createdResources.airtableProjectId;
+      if (connectionStatus.airtable && airtableProjectIdToUpdate) {
+        try {
+          const f = airtableProjectFields;
+          const tableName = airtableTables.projects || 'Projects';
+          const urlUpdates: Record<string, string> = {};
+
+          // Get the URLs from local variables (just created) or state (existing)
+          const asanaUrl = newAsanaProjectGid ? asana.getProjectUrl(newAsanaProjectGid) : createdResources.asanaUrl;
+          const scopingDocUrl = newScopingDocUrl || createdResources.scopingDocUrl;
+          const folderUrl = newFolderUrl || createdResources.folderUrl;
+
+          if (asanaUrl) {
+            urlUpdates[f.asana_url || 'Asana Board'] = asanaUrl;
+          }
+          if (scopingDocUrl) {
+            urlUpdates[f.scoping_doc_url || 'Project Scope'] = scopingDocUrl;
+          }
+          if (folderUrl) {
+            urlUpdates[f.folder_url || 'Project Folder'] = folderUrl;
+          }
+
+          if (Object.keys(urlUpdates).length > 0) {
+            debugLogger.log('form', 'Updating Airtable with resource URLs', { airtableProjectIdToUpdate, urlUpdates });
+            await airtable.updateRecord(tableName, airtableProjectIdToUpdate, urlUpdates);
+          }
+        } catch (err) {
+          debugLogger.log('error', 'Failed to update Airtable with resource URLs', err);
+          // Don't fail the whole operation for this
         }
       }
     } finally {
@@ -1515,18 +1694,32 @@ export default function ProjectForm() {
                       {...register(`outcomes.${index}.description`)}
                     />
 
-                    <input
-                      type="date"
-                      className="form-input"
-                      {...register(`outcomes.${index}.dueDate`)}
-                    />
+                    <div className="grid grid-cols-2 gap-3">
+                      <input
+                        type="date"
+                        className="form-input"
+                        {...register(`outcomes.${index}.dueDate`)}
+                      />
+
+                      <select
+                        className="form-input"
+                        {...register(`outcomes.${index}.assignee`)}
+                      >
+                        <option value="">Assign to Project Coordinator</option>
+                        {teamMembers.map((member) => (
+                          <option key={member.id} value={member.id}>
+                            {member.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
               ))}
 
               <button
                 type="button"
-                onClick={() => addOutcome({ name: '', description: '', dueDate: '' })}
+                onClick={() => addOutcome({ name: '', description: '', dueDate: '', assignee: '' })}
                 className="btn-secondary w-full flex items-center justify-center space-x-2"
               >
                 <PlusIcon className="w-4 h-4" />
@@ -1760,6 +1953,7 @@ export default function ProjectForm() {
               airtableProjectId={createdResources.airtableProjectId}
               onLinkResource={handleLinkResource}
               onCreateResource={handleCreateIndividualResource}
+              onSyncMilestones={handleSyncMilestones}
               isLoading={loadingAction !== null}
             />
 

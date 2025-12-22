@@ -92,7 +92,7 @@ If populating from an existing record, remember that fact & during submission, d
 - deploy to prod on PR to main
 - deploy preview links on PR creation, and push notification of deploy link as comment to the PR
 
-Deploy *only* the project creation helper app, *not* the oauth relay, as the platform oauth endpoints need a stable redirect url.  
+Deploy *only* the project creation helper app, *not* the oauth relay, as the platform oauth endpoints need a stable redirect url.  `x
 
 
 

@@ -318,7 +318,8 @@ export async function createAssignments(
       };
 
       if (fte !== undefined && fte !== null && fte !== '') {
-        fields[f.fte || 'FTE'] = parseFloat(fte);
+        // Convert percentage to decimal (e.g., 50 -> 0.5) for Airtable
+        fields[f.fte || 'FTE'] = parseFloat(fte) / 100;
       }
 
       records.push({ fields });

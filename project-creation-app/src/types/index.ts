@@ -11,6 +11,7 @@ export interface Outcome {
   name: string;
   description: string;
   dueDate: string;
+  assignee?: string; // Team member ID - defaults to Project Coordinator if blank
 }
 
 export interface FormData {
