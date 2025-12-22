@@ -6,6 +6,7 @@ import ShareDraftModal from '../components/ui/ShareDraftModal';
 import DuplicateResolutionModal from '../components/ui/DuplicateResolutionModal';
 import ProjectSearch from '../components/ui/ProjectSearch';
 import ProjectPreviewModal, { type PopulateFormData } from '../components/ui/ProjectPreviewModal';
+import ResourceManagement from '../components/ui/ResourceManagement';
 import {
   FormSection,
   FormField,
@@ -611,15 +612,110 @@ export default function ProjectForm() {
   // Navigate to success page
   const handleFinish = (): void => {
     localStorage.removeItem(DRAFT_KEY);
+    const data = getFormData();
     navigate('/success', {
       state: {
-        projectName: watchedValues.projectName,
+        projectName: data.projectName,
         airtableUrl: createdResources.airtableUrl,
         asanaUrl: createdResources.asanaUrl,
         driveUrl: createdResources.folderUrl,
         deckUrl: createdResources.kickoffDeckUrl,
       },
     });
+  };
+
+  // === POST-SUBMISSION RESOURCE MANAGEMENT (Phase 4) ===
+
+  // Link an existing resource URL to the Airtable record
+  const handleLinkResource = async (resourceKey: keyof CreatedResources, url: string): Promise<void> => {
+    if (!createdResources.airtableProjectId) {
+      throw new Error('No Airtable record to link to');
+    }
+
+    // Map resource keys to Airtable field names
+    const fieldMap: Partial<Record<keyof CreatedResources, string>> = {
+      asanaUrl: airtableProjectFields.asana_url || 'Asana Board',
+      scopingDocUrl: airtableProjectFields.scoping_doc_url || 'Scoping Doc',
+      kickoffDeckUrl: airtableProjectFields.kickoff_deck_url || 'Kickoff Deck',
+      folderUrl: airtableProjectFields.folder_url || 'Project Folder',
+    };
+
+    const fieldName = fieldMap[resourceKey];
+    if (!fieldName) {
+      throw new Error(`Cannot link resource type: ${resourceKey}`);
+    }
+
+    // Update Airtable record
+    const tableName = airtableTables.projects || 'Projects';
+    await airtable.updateRecord(tableName, createdResources.airtableProjectId, {
+      [fieldName]: url,
+    });
+
+    // Update local state
+    updateCreatedResources({ [resourceKey]: url });
+
+    debugLogger.log('form', 'Linked resource to Airtable', { resourceKey, url });
+  };
+
+  // Create an individual resource after initial submission
+  const handleCreateIndividualResource = async (
+    resourceType: 'asana' | 'scopingDoc' | 'kickoffDeck' | 'folder'
+  ): Promise<void> => {
+    const data = getFormData();
+
+    switch (resourceType) {
+      case 'asana':
+        await handleCreateAsanaBoard();
+        // Update Airtable with new Asana URL
+        if (createdResources.asanaUrl && createdResources.airtableProjectId) {
+          const tableName = airtableTables.projects || 'Projects';
+          await airtable.updateRecord(tableName, createdResources.airtableProjectId, {
+            [airtableProjectFields.asana_url || 'Asana Board']: createdResources.asanaUrl,
+          });
+        }
+        break;
+
+      case 'scopingDoc':
+        await handleCreateScopingDoc();
+        // Update Airtable with new Scoping Doc URL
+        if (createdResources.scopingDocUrl && createdResources.airtableProjectId) {
+          const tableName = airtableTables.projects || 'Projects';
+          await airtable.updateRecord(tableName, createdResources.airtableProjectId, {
+            [airtableProjectFields.scoping_doc_url || 'Scoping Doc']: createdResources.scopingDocUrl,
+          });
+        }
+        break;
+
+      case 'kickoffDeck':
+        await handleCreateKickoffDeck();
+        // Update Airtable with new Kickoff Deck URL
+        if (createdResources.kickoffDeckUrl && createdResources.airtableProjectId) {
+          const tableName = airtableTables.projects || 'Projects';
+          await airtable.updateRecord(tableName, createdResources.airtableProjectId, {
+            [airtableProjectFields.kickoff_deck_url || 'Kickoff Deck']: createdResources.kickoffDeckUrl,
+          });
+        }
+        break;
+
+      case 'folder':
+        // Create just the folder
+        const sharedDriveId = import.meta.env.VITE_GOOGLE_SHARED_DRIVE_ID;
+        const parentFolderId = import.meta.env.VITE_GOOGLE_PROJECTS_FOLDER_ID;
+        const folderName = data.projectAcronym || data.projectName;
+
+        const newFolder = await google.createDriveFolder(folderName, sharedDriveId, parentFolderId);
+        const folderUrl = google.getFolderUrl(newFolder.id);
+        updateCreatedResources({ googleFolderId: newFolder.id, folderUrl });
+
+        // Update Airtable
+        if (createdResources.airtableProjectId) {
+          const tableName = airtableTables.projects || 'Projects';
+          await airtable.updateRecord(tableName, createdResources.airtableProjectId, {
+            [airtableProjectFields.folder_url || 'Project Folder']: folderUrl,
+          });
+        }
+        break;
+    }
   };
 
   // === CREATE ALL RESOURCES (with duplicate check) ===
@@ -1655,6 +1751,16 @@ export default function ProjectForm() {
                 </div>
               </div>
             )}
+
+            {/* Post-submission Resource Management (Phase 4) */}
+            <ResourceManagement
+              createdResources={createdResources}
+              connectionStatus={connectionStatus}
+              airtableProjectId={createdResources.airtableProjectId}
+              onLinkResource={handleLinkResource}
+              onCreateResource={handleCreateIndividualResource}
+              isLoading={loadingAction !== null}
+            />
 
             {/* Status and navigation */}
             <div className="mt-6 pt-4 border-t border-gray-200 flex items-center justify-between">

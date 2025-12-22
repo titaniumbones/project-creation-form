@@ -1,7 +1,7 @@
 # ADR-006: Duplicate Management and Resource Creation Flow
 
 ## Status
-**In Progress** - Phase 1-3 complete, Phase 4 pending
+**Complete** - All phases implemented
 
 ## Context
 
@@ -284,6 +284,46 @@ if (connectionStatus.google && !skipGoogle) { /* create Google Drive */ }
 if (connectionStatus.airtable && !skipAirtable) { /* create Airtable */ }
 ```
 
+### Phase 4 Implementation (Complete)
+
+#### ResourceManagement Component
+
+New component `src/components/ui/ResourceManagement.tsx` provides post-submission resource management:
+
+**Features:**
+- Shows status of all resources (created vs missing)
+- "Link URL" button for missing resources - enter existing URL
+- "Create Now" button for missing resources - create individually
+- Only shows when Airtable record exists but other resources are missing
+- Automatically updates Airtable record when linking URLs
+
+**Resource Row States:**
+- **Created**: Shows checkmark with View link
+- **Missing (connected)**: Shows Link URL and Create Now buttons
+- **Missing (not connected)**: Shows grayed out "Not connected"
+
+#### Handler Functions (`ProjectForm.tsx`)
+
+**`handleLinkResource(resourceKey, url)`:**
+1. Validates URL format for resource type
+2. Updates Airtable record with URL via API
+3. Updates local `createdResources` state
+
+**`handleCreateIndividualResource(resourceType)`:**
+1. Calls existing creation handler (e.g., `handleCreateScopingDoc`)
+2. Updates Airtable record with new URL
+3. Works for: Asana, Scoping Doc, Kickoff Deck, Google Folder
+
+**Airtable Field Mapping:**
+```typescript
+const fieldMap = {
+  asanaUrl: 'Asana Board',
+  scopingDocUrl: 'Scoping Doc',
+  kickoffDeckUrl: 'Kickoff Deck',
+  folderUrl: 'Project Folder',
+};
+```
+
 ## Consequences
 
 ### Positive
@@ -319,6 +359,10 @@ if (connectionStatus.airtable && !skipAirtable) { /* create Airtable */ }
 ### Phase 3
 - `src/pages/ProjectForm.tsx` - Replaced dual buttons with single "Submit and Check"; removed individual ActionButtons; added Created Resources Status section
 - `src/components/ui/DuplicateResolutionModal.tsx` - Complete redesign with platform status types, summary bar, enhanced visual display for all states
+
+### Phase 4
+- `src/components/ui/ResourceManagement.tsx` - New component for post-submission resource linking and creation
+- `src/pages/ProjectForm.tsx` - Added `handleLinkResource` and `handleCreateIndividualResource` handlers; integrated ResourceManagement component
 
 ## References
 - ROADMAP.md lines 79-89
