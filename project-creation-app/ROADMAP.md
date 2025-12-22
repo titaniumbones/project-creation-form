@@ -93,6 +93,9 @@ If populating from an existing record, remember that fact & during submission, d
 - For each resource, offer a set of radio button options as before. Ensure each of them includes a "do nothing" (or similar) option.
 - This UI should replace the existing resource creation buttons, which should no longer be accessible directly from the form until after submission. At that point, they should appear at the bottom of the page, and should include the "link" and "recreate" buttons as they do right now.
 
+Deploy *only* the project creation helper app, *not* the oauth relay, as the platform oauth endpoints need a stable redirect url.
+
+**How it works:** Netlify's native GitHub integration automatically creates deploy previews for PRs. The root `netlify.toml` configures `base = "project-creation-app"` for monorepo support. Environment variables are configured in Netlify site settings (sync with `npm run env:sync:execute`).  
 
 ## Add Auth0 Authentication
 
