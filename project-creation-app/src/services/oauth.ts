@@ -70,6 +70,12 @@ export const tokenManager = {
   isTokenValid(service: ServiceName): boolean {
     const token = this.getToken(service);
     if (!token || !token.access_token) return false;
+
+    // If we have a refresh token, we can always renew - consider connection valid
+    // Actual API calls use getValidToken() which handles refresh automatically
+    if (token.refresh_token) return true;
+
+    // No refresh token - check if access token itself is still valid
     if (token.expiresAt && Date.now() > token.expiresAt - 60000) return false;
     return true;
   },
